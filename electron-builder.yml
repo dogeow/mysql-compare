@@ -1,0 +1,15 @@
+appId: com.dogeow.mysqlcompare
+productName: MySQL Compare
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+  - package.json
+mac:
+  target: [dmg]
+  category: public.app-category.developer-tools
+win:
+  target: [nsis]
+linux:
+  target: [AppImage]
