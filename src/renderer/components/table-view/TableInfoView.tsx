@@ -47,7 +47,7 @@ export function TableInfoView({ connectionId, database, table }: Props) {
     if (!confirmSQL) return
     setBusy(true)
     try {
-      await unwrap(api.mysql.executeSQL(connectionId, confirmSQL, database))
+      await unwrap(api.db.executeSQL(connectionId, confirmSQL, database))
       showToast('Table comment updated', 'success')
       setConfirmSQL(null)
       setEditing(false)

@@ -31,7 +31,7 @@ export function DiffPanel() {
   const loadDbs = async (id: string, setter: (l: string[]) => void) => {
     if (!id) return
     try {
-      setter(await unwrap(api.mysql.listDatabases(id)))
+      setter(await unwrap(api.db.listDatabases(id)))
     } catch (err) {
       showToast((err as Error).message, 'error')
     }

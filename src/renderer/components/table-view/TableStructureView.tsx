@@ -154,7 +154,7 @@ export function TableStructureView({ connectionId, database, table }: Props) {
     if (!pendingAction) return
     setBusy(true)
     try {
-      await unwrap(api.mysql.executeSQL(connectionId, pendingAction.sql, database))
+      await unwrap(api.db.executeSQL(connectionId, pendingAction.sql, database))
       showToast(pendingAction.successMessage, 'success')
       setPendingAction(null)
       setEditingColumn(null)

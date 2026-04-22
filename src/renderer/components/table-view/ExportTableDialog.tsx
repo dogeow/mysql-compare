@@ -86,7 +86,7 @@ export function ExportTableDialog({
 
     setBusy(true)
     try {
-      const result = await unwrap<ExportTableResult>(api.mysql.exportTable(request))
+      const result = await unwrap<ExportTableResult>(api.db.exportTable(request))
       if (!result.canceled) {
         const message =
           format === 'sql' && includeCreateTable && !includeData

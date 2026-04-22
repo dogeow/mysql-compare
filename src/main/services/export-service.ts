@@ -1,9 +1,9 @@
 import { appendFile, writeFile } from 'node:fs/promises'
 import { dirname, extname, join } from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
-import type { RowDataPacket } from 'mysql2'
 import { schemaService } from './schema-service'
-import { mysqlService } from './mysql-service'
+import { dbService } from './db-service'
+import type { DbDriver } from './drivers/types'
 import type { ColumnInfo, ExportTableRequest, ExportTableResult } from '../../shared/types'
 
 const EXPORT_BATCH_SIZE = 1000
@@ -12,6 +12,7 @@ export class ExportService {
   async exportTable(req: ExportTableRequest): Promise<ExportTableResult> {
     this.validate(req)
 
+    const driver = await dbService.getDriver(req.connectionId)
     const schema = await schemaService.getTableSchema(req.connectionId, req.database, req.table)
     this.validateQueryOptions(req, schema.columns)
     const filePath = await this.pickFilePath(req)
@@ -30,10 +31,14 @@ export class ExportService {
         await appendFile(filePath, `${ensureSemicolon(schema.createSQL)}\n\n`, 'utf8')
       }
       if (includeData) {
-        for await (const rows of this.iterateRows(req, schema.columns, schema.primaryKey)) {
+        for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
           if (rows.length === 0) continue
           rowsExported += rows.length
-          await appendFile(filePath, `${buildInsertSQL(req.database, req.table, schema.columns, rows)}\n`, 'utf8')
+          await appendFile(
+            filePath,
+            `${driver.dialect.renderInsert(req.database, req.table, schema.columns, rows)}\n`,
+            'utf8'
+          )
         }
       }
     } else {
@@ -48,7 +53,7 @@ export class ExportService {
         )
       }
 
-      for await (const rows of this.iterateRows(req, schema.columns, schema.primaryKey)) {
+      for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
         if (rows.length === 0) continue
         rowsExported += rows.length
         await appendFile(filePath, `${buildDelimitedRows(schema.columns, rows, delimiter)}\n`, 'utf8')
@@ -106,55 +111,45 @@ export class ExportService {
   }
 
   private async *iterateRows(
+    driver: DbDriver,
     req: ExportTableRequest,
     columns: ColumnInfo[],
     primaryKey: string[]
   ): AsyncGenerator<Record<string, unknown>[]> {
-    const pool = await mysqlService.getPool(req.connectionId, req.database)
-    const columnList = columns.map((column) => quoteIdent(column.name)).join(', ')
-    const tableName = quoteTable(req.database, req.table)
-    const whereClause =
-      req.scope === 'all' || !req.where?.trim() ? '' : `WHERE ${req.where.trim()}`
-    const orderClause = buildStableOrderClause(columns, primaryKey, req.orderBy)
+    const columnNames = columns.map((c) => c.name)
+    const where = req.scope === 'all' ? undefined : req.where
 
     if (req.scope === 'page') {
-      const limit = Math.max(1, req.pageSize ?? 100)
-      const offset = Math.max(0, ((req.page ?? 1) - 1) * limit)
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT ${columnList} FROM ${tableName} ${whereClause} ${orderClause} LIMIT ${limit} OFFSET ${offset}`
-      )
-      yield rows as Record<string, unknown>[]
+      const pageSize = Math.max(1, req.pageSize ?? 100)
+      const result = await driver.queryRows({
+        connectionId: req.connectionId,
+        database: req.database,
+        table: req.table,
+        page: req.page ?? 1,
+        pageSize,
+        orderBy: req.orderBy,
+        where
+      })
+      yield result.rows.map((row) => {
+        const projected: Record<string, unknown> = {}
+        for (const name of columnNames) projected[name] = row[name]
+        return projected
+      })
       return
     }
 
-    let offset = 0
-    while (true) {
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT ${columnList} FROM ${tableName} ${whereClause} ${orderClause} LIMIT ${EXPORT_BATCH_SIZE} OFFSET ${offset}`
-      )
-      const chunk = rows as Record<string, unknown>[]
-      if (chunk.length === 0) return
-      yield chunk
-      if (chunk.length < EXPORT_BATCH_SIZE) return
-      offset += chunk.length
+    for await (const batch of driver.streamRows({
+      database: req.database,
+      table: req.table,
+      columns: columnNames,
+      primaryKey,
+      orderBy: req.orderBy,
+      where,
+      batchSize: EXPORT_BATCH_SIZE
+    })) {
+      yield batch
     }
   }
-}
-
-function buildInsertSQL(
-  database: string,
-  table: string,
-  columns: ColumnInfo[],
-  rows: Record<string, unknown>[]
-): string {
-  const columnList = columns.map((column) => quoteIdent(column.name)).join(', ')
-  const values = rows
-    .map((row) => {
-      const serialized = columns.map((column) => formatSQLValue(row[column.name]))
-      return `(${serialized.join(', ')})`
-    })
-    .join(',\n  ')
-  return `INSERT INTO ${quoteTable(database, table)} (${columnList}) VALUES\n  ${values};`
 }
 
 function buildDelimitedRows(
@@ -187,30 +182,10 @@ function formatTextValue(value: unknown): string {
   return String(value)
 }
 
-function formatSQLValue(value: unknown): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NULL'
-  if (typeof value === 'boolean') return value ? '1' : '0'
-  if (value instanceof Date) return `'${value.toISOString().slice(0, 19).replace('T', ' ')}'`
-  if (Buffer.isBuffer(value)) return `0x${value.toString('hex')}`
-  if (typeof value === 'object') {
-    return `'${JSON.stringify(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
-  }
-  return `'${String(value).replace(/\\/g, '\\\\').replace(/'/g, "''")}'`
-}
-
 function ensureSemicolon(sql: string): string {
   const trimmed = sql.trim()
   if (!trimmed) return ''
   return trimmed.endsWith(';') ? trimmed : `${trimmed};`
-}
-
-function quoteIdent(name: string): string {
-  return `\`${name.replace(/`/g, '``')}\``
-}
-
-function quoteTable(database: string, table: string): string {
-  return `${quoteIdent(database)}.${quoteIdent(table)}`
 }
 
 function sanitizeFileName(name: string): string {
@@ -222,29 +197,6 @@ function normalizeExtension(filePath: string, extension: string): string {
   const baseName = filePath.slice(0, filePath.length - extname(filePath).length)
   if (!extname(filePath)) return `${filePath}.${extension}`
   return join(dirname(filePath), `${baseName.split('/').pop() ?? 'export'}.${extension}`)
-}
-
-function buildStableOrderClause(
-  columns: ColumnInfo[],
-  primaryKey: string[],
-  orderBy?: { column: string; dir: 'ASC' | 'DESC' }
-): string {
-  const parts: string[] = []
-  const seen = new Set<string>()
-
-  if (orderBy) {
-    parts.push(`${quoteIdent(orderBy.column)} ${orderBy.dir}`)
-    seen.add(orderBy.column)
-  }
-
-  const stableColumns = primaryKey.length > 0 ? primaryKey : columns.map((column) => column.name)
-  for (const column of stableColumns) {
-    if (seen.has(column)) continue
-    parts.push(`${quoteIdent(column)} ASC`)
-    seen.add(column)
-  }
-
-  return parts.length > 0 ? `ORDER BY ${parts.join(', ')}` : ''
 }
 
 export const exportService = new ExportService()

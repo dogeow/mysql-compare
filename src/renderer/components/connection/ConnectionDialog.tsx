@@ -7,7 +7,12 @@ import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { api, unwrap } from '@renderer/lib/api'
 import { useUIStore } from '@renderer/store/ui-store'
-import type { ConnectionConfig, SafeConnection } from '../../../shared/types'
+import type { ConnectionConfig, DbEngine, SafeConnection } from '../../../shared/types'
+
+const DEFAULT_PORT: Record<DbEngine, number> = {
+  mysql: 3306,
+  postgres: 5432
+}
 
 interface Props {
   open: boolean
@@ -49,6 +54,13 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
           sshPrivateKey: '',
           sshPassphrase: ''
         }
+      }
+      if (key === 'engine') {
+        const nextEngine = value as DbEngine
+        const previousDefault = DEFAULT_PORT[current.engine]
+        // 切换引擎时，若当前端口还是上一引擎默认值，同步切换为新默认值
+        const nextPort = current.port === previousDefault ? DEFAULT_PORT[nextEngine] : current.port
+        return { ...current, engine: nextEngine, port: nextPort }
       }
       return { ...current, [key]: value }
     })
@@ -125,7 +137,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
       open={open}
       onOpenChange={onOpenChange}
       title={connection ? 'Edit Connection' : 'New Connection'}
-      description="Connect to MySQL directly or through an SSH tunnel."
+      description="Connect to MySQL or PostgreSQL, directly or through an SSH tunnel."
       className="max-w-2xl"
       footer={
         <>
@@ -139,12 +151,23 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
       }
     >
       <div className="grid grid-cols-2 gap-3">
+        <Field label="Engine">
+          <select
+            value={form.engine}
+            onChange={(e) => update('engine', e.target.value as DbEngine)}
+            className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
+          >
+            <option value="mysql">MySQL</option>
+            <option value="postgres">PostgreSQL</option>
+          </select>
+        </Field>
         <Field label="Name">
           <Input value={form.name} onChange={(e) => update('name', e.target.value)} />
         </Field>
         <Field label="Group">
           <Input value={form.group || ''} onChange={(e) => update('group', e.target.value)} />
         </Field>
+        <div />
         <Field label="Host">
           <Input value={form.host} onChange={(e) => update('host', e.target.value)} />
         </Field>
@@ -154,7 +177,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
             min={1}
             max={65535}
             value={form.port}
-            onChange={(e) => update('port', parsePortValue(e.target.value, 3306))}
+            onChange={(e) => update('port', parsePortValue(e.target.value, DEFAULT_PORT[form.engine]))}
           />
         </Field>
         <Field label="Username">
@@ -284,13 +307,15 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
 }
 
 function createInitialForm(connection?: SafeConnection | null): ConnectionConfig {
+  const engine: DbEngine = connection?.engine || 'mysql'
   return {
     id: connection?.id || '',
+    engine,
     name: connection?.name || '',
     group: connection?.group || '',
     host: connection?.host || '127.0.0.1',
-    port: connection?.port || 3306,
-    username: connection?.username || 'root',
+    port: connection?.port || DEFAULT_PORT[engine],
+    username: connection?.username || (engine === 'postgres' ? 'postgres' : 'root'),
     password: '',
     database: connection?.database || '',
     useSSH: connection?.useSSH || false,

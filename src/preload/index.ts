@@ -33,7 +33,7 @@ const api = {
     remove: (id: string) => invoke<void>(IPC.ConnectionDelete, id),
     test: (conn: ConnectionConfig) => invoke<{ message: string }>(IPC.ConnectionTest, conn)
   },
-  mysql: {
+  db: {
     listDatabases: (connectionId: string) =>
       invoke<string[]>(IPC.ListDatabases, { connectionId }),
     listTables: (connectionId: string, database: string) =>

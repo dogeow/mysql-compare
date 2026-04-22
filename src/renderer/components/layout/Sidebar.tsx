@@ -189,7 +189,7 @@ export function Sidebar() {
       }))
     }
     try {
-      const dbs = await unwrap(api.mysql.listDatabases(conn.id))
+      const dbs = await unwrap(api.db.listDatabases(conn.id))
       setNodes((state) => ({
         ...state,
         [conn.id]: { ...state[conn.id]!, loading: false, databases: dbs }
@@ -213,7 +213,7 @@ export function Sidebar() {
     setNodes((state) => ({ ...state, [conn.id]: { ...node, expandedDbs: nextExpanded } }))
     if (!node.tables[db]) {
       try {
-        const tables = await unwrap(api.mysql.listTables(conn.id, db))
+        const tables = await unwrap(api.db.listTables(conn.id, db))
         setNodes((state) => {
           const current = state[conn.id]!
           return { ...state, [conn.id]: { ...current, tables: { ...current.tables, [db]: tables } } }
@@ -226,7 +226,7 @@ export function Sidebar() {
 
   const refreshDatabase = async (conn: SafeConnection, db: string) => {
     try {
-      const tables = await unwrap(api.mysql.listTables(conn.id, db))
+      const tables = await unwrap(api.db.listTables(conn.id, db))
       setNodes((state) => {
         const current = state[conn.id]!
         return { ...state, [conn.id]: { ...current, tables: { ...current.tables, [db]: tables } } }
@@ -277,7 +277,7 @@ export function Sidebar() {
     setActionBusy(true)
     try {
       const result = await unwrap(
-        api.mysql.renameTable({
+        api.db.renameTable({
           connectionId: renameDialog.connection.id,
           database: renameDialog.database,
           table: renameDialog.table,
@@ -307,7 +307,7 @@ export function Sidebar() {
     setActionBusy(true)
     try {
       const result = await unwrap(
-        api.mysql.copyTable({
+        api.db.copyTable({
           connectionId: menu.connection.id,
           database: menu.database,
           table: menu.table,
@@ -356,7 +356,7 @@ export function Sidebar() {
     setActionBusy(true)
     try {
       await unwrap(
-        api.mysql.dropTable({
+        api.db.dropTable({
           connectionId: menu.connection.id,
           database: menu.database,
           table: menu.table

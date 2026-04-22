@@ -8,7 +8,7 @@ import type {
   IndexInfo,
   TableDiff
 } from '../../shared/types'
-import { mysqlService } from './mysql-service'
+import { dbService } from './db-service'
 import { schemaService } from './schema-service'
 
 export class DiffService {
@@ -18,9 +18,13 @@ export class DiffService {
     targetConnectionId: string,
     targetDatabase: string
   ): Promise<DatabaseDiff> {
+    const [sDriver, tDriver] = await Promise.all([
+      dbService.getDriver(sourceConnectionId),
+      dbService.getDriver(targetConnectionId)
+    ])
     const [sTables, tTables] = await Promise.all([
-      mysqlService.listTables(sourceConnectionId, sourceDatabase),
-      mysqlService.listTables(targetConnectionId, targetDatabase)
+      sDriver.listTables(sourceDatabase),
+      tDriver.listTables(targetDatabase)
     ])
     const all = Array.from(new Set([...sTables, ...tTables])).sort()
     const tableDiffs: TableDiff[] = []

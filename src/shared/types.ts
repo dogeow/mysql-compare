@@ -1,8 +1,11 @@
 // 跨进程共享的所有类型定义。renderer / preload / main 都从这里导入，保证类型一致。
 
 // ---------- 连接 ----------
+export type DbEngine = 'mysql' | 'postgres'
+
 export interface ConnectionConfig {
   id: string
+  engine: DbEngine
   name: string
   group?: string
   host: string
@@ -36,13 +39,13 @@ export type SafeConnection = Omit<
 // ---------- 表 / 字段 ----------
 export interface ColumnInfo {
   name: string
-  type: string                // 原始 column type, e.g. varchar(255)
+  type: string                // 原始 column type, e.g. varchar(255) / integer
   nullable: boolean
   defaultValue: string | null
   isPrimaryKey: boolean
-  isAutoIncrement: boolean
+  isAutoIncrement: boolean    // MySQL: AUTO_INCREMENT；PG: DEFAULT nextval(...) / IDENTITY
   comment: string
-  /** raw COLUMN_KEY: PRI/UNI/MUL/'' */
+  /** MySQL COLUMN_KEY: PRI/UNI/MUL/''；PG 用 PRI/UNI/'' */
   columnKey: string
 }
 

@@ -1,0 +1,93 @@
+import { IPC } from '../../shared/ipc-channels'
+import type {
+  CopyTableRequest,
+  DeleteRowsRequest,
+  DropTableRequest,
+  ExportTableRequest,
+  ExportTableResult,
+  InsertRowRequest,
+  QueryRowsRequest,
+  QueryRowsResult,
+  RenameTableRequest,
+  UpdateRowRequest
+} from '../../shared/types'
+import { dbService } from '../services/db-service'
+import { exportService } from '../services/export-service'
+import { schemaService } from '../services/schema-service'
+import { handle } from './_wrap'
+
+export function registerDbIPC(): void {
+  handle(IPC.ListDatabases, async ({ connectionId }: { connectionId: string }) => {
+    const driver = await dbService.getDriver(connectionId)
+    return driver.listDatabases()
+  })
+
+  handle(
+    IPC.ListTables,
+    async ({ connectionId, database }: { connectionId: string; database: string }) => {
+      const driver = await dbService.getDriver(connectionId)
+      return driver.listTables(database)
+    }
+  )
+
+  handle(IPC.QueryRows, async (req: QueryRowsRequest): Promise<QueryRowsResult> => {
+    const driver = await dbService.getDriver(req.connectionId)
+    const schema = await schemaService.getTableSchema(req.connectionId, req.database, req.table)
+    if (req.orderBy && !schema.columns.some((column) => column.name === req.orderBy?.column)) {
+      throw new Error(`Unknown sort column "${req.orderBy.column}"`)
+    }
+    const { rows, total } = await driver.queryRows(req)
+    return {
+      rows,
+      total,
+      hasPrimaryKey: schema.primaryKey.length > 0,
+      primaryKey: schema.primaryKey,
+      columns: schema.columns
+    }
+  })
+
+  handle(IPC.InsertRow, async (req: InsertRowRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.insertRow(req)
+  })
+  handle(IPC.UpdateRow, async (req: UpdateRowRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.updateRow(req)
+  })
+  handle(IPC.DeleteRows, async (req: DeleteRowsRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.deleteRows(req)
+  })
+  handle(IPC.RenameTable, async (req: RenameTableRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.renameTable(req)
+  })
+  handle(IPC.CopyTable, async (req: CopyTableRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.copyTable(req)
+  })
+  handle(IPC.DropTable, async (req: DropTableRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.dropTable(req)
+  })
+  handle(
+    IPC.ExportTable,
+    (req: ExportTableRequest): Promise<ExportTableResult> => exportService.exportTable(req)
+  )
+
+  handle(
+    IPC.ExecuteSQL,
+    async ({
+      connectionId,
+      sql,
+      database
+    }: {
+      connectionId: string
+      sql: string
+      database?: string
+    }) => {
+      const driver = await dbService.getDriver(connectionId)
+      return driver.executeSQL(sql, database)
+    }
+  )
+}

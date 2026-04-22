@@ -53,7 +53,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
     void (async () => {
       try {
         const result = await unwrap<QueryRowsResult>(
-          api.mysql.queryRows({
+          api.db.queryRows({
             connectionId,
             database,
             table,
@@ -105,7 +105,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
     if (!confirm(`Delete ${selected.size} row(s)? This cannot be undone.`)) return
     const pkRows = Array.from(selected).map((i) => pickPK(data.rows[i]!, data.primaryKey))
     try {
-      const r = await unwrap(api.mysql.deleteRows({ connectionId, database, table, pkRows }))
+      const r = await unwrap(api.db.deleteRows({ connectionId, database, table, pkRows }))
       showToast(`Deleted ${(r as { affectedRows: number }).affectedRows} row(s)`, 'success')
       refresh()
     } catch (err) {
@@ -257,11 +257,11 @@ export function TableDataView({ connectionId, database, table }: Props) {
           onSubmit={async (values, pkOld) => {
             try {
               if (editing.mode === 'insert') {
-                await unwrap(api.mysql.insertRow({ connectionId, database, table, values }))
+                await unwrap(api.db.insertRow({ connectionId, database, table, values }))
                 showToast('Row inserted', 'success')
               } else {
                 await unwrap(
-                  api.mysql.updateRow({ connectionId, database, table, pkValues: pkOld!, changes: values })
+                  api.db.updateRow({ connectionId, database, table, pkValues: pkOld!, changes: values })
                 )
                 showToast('Row updated', 'success')
               }

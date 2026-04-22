@@ -25,6 +25,7 @@ const store = new Store<Schema>({
 function toStored(c: ConnectionConfig): StoredConnection {
   return {
     id: c.id || uuid(),
+    engine: c.engine || 'mysql',
     name: c.name,
     group: c.group,
     host: c.host,
@@ -47,6 +48,7 @@ function toStored(c: ConnectionConfig): StoredConnection {
 function toSafe(s: StoredConnection): SafeConnection {
   return {
     id: s.id,
+    engine: s.engine || 'mysql',
     name: s.name,
     group: s.group,
     host: s.host,
@@ -74,6 +76,7 @@ function pickSecret(nextValue: string | undefined, previousValue: string | undef
 function toFull(s: StoredConnection): ConnectionConfig {
   return {
     id: s.id,
+    engine: s.engine || 'mysql',
     name: s.name,
     group: s.group,
     host: s.host,

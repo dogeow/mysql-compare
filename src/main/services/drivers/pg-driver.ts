@@ -1,0 +1,474 @@
+// Postgres 驱动实现。UI 语义上的 "database" 直接映射到 PG 的 database
+// （PG schema 在 MVP 阶段硬编码为 'public'）。因为每个 pg 连接绑定单个 database，
+// 这里按 database 名维护一组 pg.Pool。
+import pg from 'pg'
+import type { PoolClient, QueryResultRow } from 'pg'
+import type {
+  ColumnInfo,
+  ConnectionConfig,
+  CopyTableRequest,
+  DeleteRowsRequest,
+  DropTableRequest,
+  IndexInfo,
+  InsertRowRequest,
+  QueryRowsRequest,
+  RenameTableRequest,
+  TableSchema,
+  UpdateRowRequest
+} from '../../../shared/types'
+import type { DbDriver, Dialect, StreamRowsOptions } from './types'
+import { pgDialect, renderPgCreateTable } from './pg-dialect'
+
+const MAX_PAGE_SIZE = 1000
+const DEFAULT_SCHEMA = 'public'
+
+export class PostgresDriver implements DbDriver {
+  readonly engine = 'postgres' as const
+  readonly dialect: Dialect = pgDialect
+  readonly connectionId: string
+
+  private pools = new Map<string, pg.Pool>()
+  private readonly connection: ConnectionConfig
+  private readonly localPort: number | undefined
+
+  constructor(params: { connection: ConnectionConfig; localPort?: number }) {
+    this.connection = params.connection
+    this.localPort = params.localPort
+    this.connectionId = params.connection.id
+  }
+
+  private buildClientConfig(database?: string): pg.PoolConfig {
+    const host = this.localPort !== undefined ? '127.0.0.1' : this.connection.host
+    const port = this.localPort ?? this.connection.port
+    return {
+      host,
+      port,
+      user: this.connection.username,
+      password: this.connection.password,
+      database: database || this.connection.database || 'postgres',
+      max: 5,
+      idleTimeoutMillis: 30000
+    }
+  }
+
+  private async getPool(database?: string): Promise<pg.Pool> {
+    const key = database || this.connection.database || 'postgres'
+    const cached = this.pools.get(key)
+    if (cached) return cached
+    const pool = new pg.Pool(this.buildClientConfig(key))
+    this.pools.set(key, pool)
+    return pool
+  }
+
+  async testConnection(): Promise<string> {
+    const client = new pg.Client(this.buildClientConfig())
+    await client.connect()
+    try {
+      const res = await client.query<{ server_version: string }>('SHOW server_version')
+      return `OK · PostgreSQL ${res.rows[0]?.server_version ?? ''}`
+    } finally {
+      await client.end()
+    }
+  }
+
+  async listDatabases(): Promise<string[]> {
+    const pool = await this.getPool()
+    const res = await pool.query<{ datname: string }>(
+      `SELECT datname FROM pg_database
+       WHERE NOT datistemplate AND datallowconn
+       ORDER BY datname`
+    )
+    return res.rows.map((r) => r.datname)
+  }
+
+  async listTables(database: string): Promise<string[]> {
+    const pool = await this.getPool(database)
+    const res = await pool.query<{ table_name: string }>(
+      `SELECT table_name FROM information_schema.tables
+       WHERE table_schema = $1 AND table_type = 'BASE TABLE'
+       ORDER BY table_name`,
+      [DEFAULT_SCHEMA]
+    )
+    return res.rows.map((r) => r.table_name)
+  }
+
+  async getTableSchema(database: string, table: string): Promise<TableSchema> {
+    const pool = await this.getPool(database)
+
+    const colRes = await pool.query<{
+      column_name: string
+      data_type: string
+      udt_name: string
+      is_nullable: string
+      column_default: string | null
+      character_maximum_length: number | null
+      numeric_precision: number | null
+      numeric_scale: number | null
+    }>(
+      `SELECT column_name, data_type, udt_name, is_nullable, column_default,
+              character_maximum_length, numeric_precision, numeric_scale
+       FROM information_schema.columns
+       WHERE table_schema = $1 AND table_name = $2
+       ORDER BY ordinal_position`,
+      [DEFAULT_SCHEMA, table]
+    )
+
+    const pkRes = await pool.query<{ column_name: string }>(
+      `SELECT a.attname AS column_name
+       FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+       WHERE i.indrelid = $1::regclass AND i.indisprimary
+       ORDER BY array_position(i.indkey, a.attnum)`,
+      [qualifiedName(table)]
+    )
+    const primaryKey = pkRes.rows.map((r) => r.column_name)
+    const pkSet = new Set(primaryKey)
+
+    const uqRes = await pool.query<{ column_name: string }>(
+      `SELECT a.attname AS column_name
+       FROM pg_index i
+       JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
+       WHERE i.indrelid = $1::regclass AND i.indisunique AND NOT i.indisprimary`,
+      [qualifiedName(table)]
+    )
+    const uniqueSet = new Set(uqRes.rows.map((r) => r.column_name))
+
+    const columns: ColumnInfo[] = colRes.rows.map((r) => {
+      const isPk = pkSet.has(r.column_name)
+      const isUnique = uniqueSet.has(r.column_name)
+      const isAutoInc =
+        typeof r.column_default === 'string' &&
+        (r.column_default.startsWith('nextval(') ||
+          r.column_default.toLowerCase().includes('identity'))
+      return {
+        name: r.column_name,
+        type: formatPgType(r),
+        nullable: r.is_nullable === 'YES',
+        defaultValue: r.column_default,
+        isPrimaryKey: isPk,
+        isAutoIncrement: isAutoInc,
+        comment: '',
+        columnKey: isPk ? 'PRI' : isUnique ? 'UNI' : ''
+      }
+    })
+
+    const idxRes = await pool.query<{
+      indexname: string
+      indexdef: string
+    }>(
+      `SELECT indexname, indexdef FROM pg_indexes
+       WHERE schemaname = $1 AND tablename = $2
+       ORDER BY indexname`,
+      [DEFAULT_SCHEMA, table]
+    )
+    const indexes: IndexInfo[] = idxRes.rows.map((r) => parseIndexDef(r.indexname, r.indexdef))
+
+    const statRes = await pool.query<{
+      reltuples: number
+      obj_description: string | null
+    }>(
+      `SELECT c.reltuples::bigint AS reltuples, obj_description(c.oid, 'pg_class')
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = $1 AND c.relname = $2`,
+      [DEFAULT_SCHEMA, table]
+    )
+
+    const tableComment = (statRes.rows[0]?.obj_description ?? '') || ''
+    const schema: TableSchema = {
+      name: table,
+      columns,
+      indexes,
+      primaryKey,
+      createSQL: '',
+      rowEstimate: Number(statRes.rows[0]?.reltuples ?? 0),
+      tableComment
+    }
+    schema.createSQL = renderPgCreateTable(schema, database)
+    return schema
+  }
+
+  async queryRows(req: QueryRowsRequest) {
+    assertNonEmptySQL('database', req.database)
+    assertNonEmptySQL('table', req.table)
+    assertSafeWhereClause(req.where)
+
+    const pool = await this.getPool(req.database)
+    const safeTable = this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)
+    const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
+    const orderClause = req.orderBy
+      ? `ORDER BY ${this.dialect.quoteIdent(req.orderBy.column)} ${req.orderBy.dir}`
+      : ''
+    const offset = Math.max(0, (req.page - 1) * req.pageSize)
+    const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))
+
+    const rowsRes = await pool.query(
+      `SELECT * FROM ${safeTable} ${whereClause} ${orderClause} LIMIT ${limit} OFFSET ${offset}`
+    )
+    const countRes = await pool.query<{ c: string }>(
+      `SELECT COUNT(*) AS c FROM ${safeTable} ${whereClause}`
+    )
+    return {
+      rows: rowsRes.rows as Record<string, unknown>[],
+      total: Number(countRes.rows[0]?.c ?? 0)
+    }
+  }
+
+  async insertRow(
+    req: InsertRowRequest
+  ): Promise<{ insertId: number | string; affectedRows: number }> {
+    const cols = Object.keys(req.values)
+    if (cols.length === 0) throw new Error('No values to insert')
+    assertNonEmptySQL('table', req.table)
+    assertColumns(cols, 'insert')
+
+    const pool = await this.getPool(req.database)
+    const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ')
+    const sql = `INSERT INTO ${this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)}
+      (${cols.map((c) => this.dialect.quoteIdent(c)).join(', ')})
+      VALUES (${placeholders})`
+    const res = await pool.query(sql, cols.map((c) => req.values[c]))
+    return { insertId: 0, affectedRows: res.rowCount ?? 0 }
+  }
+
+  async updateRow(req: UpdateRowRequest): Promise<{ affectedRows: number }> {
+    const pkCols = Object.keys(req.pkValues)
+    if (pkCols.length === 0) throw new Error('Refusing to UPDATE without primary key')
+    const setCols = Object.keys(req.changes)
+    if (setCols.length === 0) return { affectedRows: 0 }
+    assertNonEmptySQL('table', req.table)
+    assertColumns(pkCols, 'primary key')
+    assertColumns(setCols, 'update')
+
+    const pool = await this.getPool(req.database)
+    const setClause = setCols
+      .map((c, i) => `${this.dialect.quoteIdent(c)} = $${i + 1}`)
+      .join(', ')
+    const whereClause = pkCols
+      .map((c, i) => `${this.dialect.quoteIdent(c)} = $${setCols.length + i + 1}`)
+      .join(' AND ')
+    const sql = `UPDATE ${this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)} SET ${setClause} WHERE ${whereClause}`
+    const params = [...setCols.map((c) => req.changes[c]), ...pkCols.map((c) => req.pkValues[c])]
+    const res = await pool.query(sql, params)
+    return { affectedRows: res.rowCount ?? 0 }
+  }
+
+  async deleteRows(req: DeleteRowsRequest): Promise<{ affectedRows: number }> {
+    if (req.pkRows.length === 0) return { affectedRows: 0 }
+    assertNonEmptySQL('table', req.table)
+
+    const pool = await this.getPool(req.database)
+    const client: PoolClient = await pool.connect()
+    const tableName = this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)
+    try {
+      await client.query('BEGIN')
+      let affected = 0
+      for (const row of req.pkRows) {
+        const cols = Object.keys(row)
+        if (cols.length === 0) throw new Error('Refusing to DELETE without primary key')
+        assertColumns(cols, 'primary key')
+        const where = cols
+          .map((c, i) => `${this.dialect.quoteIdent(c)} = $${i + 1}`)
+          .join(' AND ')
+        const res = await client.query(
+          `DELETE FROM ${tableName} WHERE ${where}`,
+          cols.map((c) => row[c])
+        )
+        affected += res.rowCount ?? 0
+      }
+      await client.query('COMMIT')
+      return { affectedRows: affected }
+    } catch (err) {
+      await client.query('ROLLBACK').catch(() => undefined)
+      throw err
+    } finally {
+      client.release()
+    }
+  }
+
+  async renameTable(req: RenameTableRequest): Promise<{ table: string }> {
+    const nextName = req.newTable.trim()
+    if (!nextName) throw new Error('New table name is required')
+    if (nextName === req.table) return { table: req.table }
+    await this.assertSourceExists(req.database, req.table)
+    await this.assertTargetAbsent(req.database, nextName)
+
+    const pool = await this.getPool(req.database)
+    await pool.query(
+      `ALTER TABLE ${this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)} RENAME TO ${this.dialect.quoteIdent(nextName)}`
+    )
+    return { table: nextName }
+  }
+
+  async copyTable(req: CopyTableRequest): Promise<{ table: string }> {
+    const targetTable = req.targetTable.trim()
+    if (!targetTable) throw new Error('Target table name is required')
+    if (targetTable === req.table) throw new Error('Target table name must be different')
+    await this.assertSourceExists(req.database, req.table)
+    await this.assertTargetAbsent(req.database, targetTable)
+
+    const pool = await this.getPool(req.database)
+    const sourceName = this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)
+    const nextName = this.dialect.quoteTable(DEFAULT_SCHEMA, targetTable)
+    let created = false
+    try {
+      await pool.query(`CREATE TABLE ${nextName} (LIKE ${sourceName} INCLUDING ALL)`)
+      created = true
+      await pool.query(`INSERT INTO ${nextName} SELECT * FROM ${sourceName}`)
+      return { table: targetTable }
+    } catch (err) {
+      if (created) {
+        await pool.query(`DROP TABLE ${nextName}`).catch(() => undefined)
+      }
+      throw err
+    }
+  }
+
+  async dropTable(req: DropTableRequest): Promise<void> {
+    await this.assertSourceExists(req.database, req.table)
+    const pool = await this.getPool(req.database)
+    await pool.query(`DROP TABLE ${this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)}`)
+  }
+
+  async executeSQL(sql: string, database?: string): Promise<unknown> {
+    if (!sql.trim()) throw new Error('SQL is required')
+    const client = new pg.Client(this.buildClientConfig(database))
+    await client.connect()
+    try {
+      const res = await client.query(sql)
+      if (Array.isArray(res)) {
+        return res.map((r) => ({ rows: r.rows, rowCount: r.rowCount }))
+      }
+      return { rows: res.rows, rowCount: res.rowCount }
+    } finally {
+      await client.end()
+    }
+  }
+
+  async *streamRows(opts: StreamRowsOptions): AsyncGenerator<Record<string, unknown>[]> {
+    if (opts.columns.length === 0) return
+
+    const pool = await this.getPool(opts.database)
+    const tableName = this.dialect.quoteTable(DEFAULT_SCHEMA, opts.table)
+    const columnList = opts.columns.map((c) => this.dialect.quoteIdent(c)).join(', ')
+    const whereClause = opts.where && opts.where.trim() ? `WHERE ${opts.where.trim()}` : ''
+    const orderClause = buildPgOrderClause(opts.columns, opts.primaryKey, opts.orderBy)
+
+    let offset = 0
+    let remaining = opts.limit
+    while (remaining === undefined || remaining > 0) {
+      const batchLimit =
+        remaining === undefined ? opts.batchSize : Math.min(opts.batchSize, remaining)
+      const res = await pool.query<QueryResultRow>(
+        `SELECT ${columnList} FROM ${tableName} ${whereClause} ${orderClause} LIMIT ${batchLimit} OFFSET ${offset}`
+      )
+      if (res.rows.length === 0) return
+      yield res.rows as Record<string, unknown>[]
+      offset += res.rows.length
+      if (remaining !== undefined) remaining -= res.rows.length
+      if (res.rows.length < batchLimit) return
+    }
+  }
+
+  async close(): Promise<void> {
+    const pools = Array.from(this.pools.values())
+    this.pools.clear()
+    await Promise.all(pools.map((p) => p.end().catch(() => undefined)))
+  }
+
+  private async tableExists(database: string, table: string): Promise<boolean> {
+    const pool = await this.getPool(database)
+    const res = await pool.query(
+      `SELECT 1 FROM information_schema.tables
+       WHERE table_schema = $1 AND table_name = $2
+       LIMIT 1`,
+      [DEFAULT_SCHEMA, table]
+    )
+    return res.rowCount !== null && res.rowCount > 0
+  }
+
+  private async assertSourceExists(database: string, table: string): Promise<void> {
+    if (!(await this.tableExists(database, table))) {
+      throw new Error(`Table "${table}" not found`)
+    }
+  }
+
+  private async assertTargetAbsent(database: string, table: string): Promise<void> {
+    if (await this.tableExists(database, table)) {
+      throw new Error(`Table "${table}" already exists`)
+    }
+  }
+}
+
+function formatPgType(r: {
+  data_type: string
+  udt_name: string
+  character_maximum_length: number | null
+  numeric_precision: number | null
+  numeric_scale: number | null
+}): string {
+  if (r.character_maximum_length) {
+    return `${r.data_type}(${r.character_maximum_length})`
+  }
+  if (
+    r.data_type === 'numeric' &&
+    r.numeric_precision !== null &&
+    r.numeric_scale !== null
+  ) {
+    return `numeric(${r.numeric_precision},${r.numeric_scale})`
+  }
+  return r.data_type
+}
+
+function parseIndexDef(name: string, def: string): IndexInfo {
+  // 形如: CREATE [UNIQUE] INDEX "name" ON "schema"."table" USING btree ("col1", "col2")
+  const unique = /^CREATE\s+UNIQUE\s+INDEX/i.test(def)
+  const usingMatch = def.match(/USING\s+(\w+)/i)
+  const type = usingMatch ? usingMatch[1]!.toUpperCase() : 'BTREE'
+  const colsMatch = def.match(/\(([^)]+)\)\s*$/)
+  const columns = colsMatch
+    ? colsMatch[1]!.split(',').map((s) => s.trim().replace(/^"/, '').replace(/"$/, ''))
+    : []
+  return { name, columns, unique, type }
+}
+
+function buildPgOrderClause(
+  columns: string[],
+  primaryKey: string[],
+  orderBy?: { column: string; dir: 'ASC' | 'DESC' }
+): string {
+  const parts: string[] = []
+  const seen = new Set<string>()
+  if (orderBy) {
+    parts.push(`${pgDialect.quoteIdent(orderBy.column)} ${orderBy.dir}`)
+    seen.add(orderBy.column)
+  }
+  const stable = primaryKey.length > 0 ? primaryKey : columns
+  for (const name of stable) {
+    if (seen.has(name)) continue
+    parts.push(`${pgDialect.quoteIdent(name)} ASC`)
+    seen.add(name)
+  }
+  return parts.length > 0 ? `ORDER BY ${parts.join(', ')}` : ''
+}
+
+function qualifiedName(table: string): string {
+  return `"${DEFAULT_SCHEMA}"."${table.replace(/"/g, '""')}"`
+}
+
+function assertColumns(columns: string[], label: string): void {
+  for (const column of columns) {
+    assertNonEmptySQL(`${label} column`, column)
+  }
+}
+
+function assertSafeWhereClause(where?: string): void {
+  if (!where?.trim()) return
+  const trimmed = where.trim()
+  if (trimmed.includes(';')) throw new Error('WHERE clause must not contain semicolons')
+  if (/--|\/\*/.test(trimmed)) throw new Error('WHERE clause must not contain SQL comments')
+}
+
+function assertNonEmptySQL(label: string, value: string): void {
+  if (!value.trim()) throw new Error(`${label} is required`)
+}

@@ -44,7 +44,7 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
     setRunning(true)
     setError(null)
     try {
-      const raw = await unwrap(api.mysql.executeSQL(connectionId, statement, database))
+      const raw = await unwrap(api.db.executeSQL(connectionId, statement, database))
       const normalized = normalizeResult(raw)
       setResult(normalized)
       showToast('SQL executed', 'success')

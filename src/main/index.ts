@@ -1,7 +1,7 @@
 import { app, BrowserWindow } from 'electron'
 import { createMainWindow } from './window'
 import { registerIPC } from './ipc'
-import { mysqlService } from './services/mysql-service'
+import { dbService } from './services/db-service'
 import { sshService } from './services/ssh-service'
 
 let shutdownPromise: Promise<void> | null = null
@@ -9,7 +9,7 @@ let shutdownPromise: Promise<void> | null = null
 function shutdownServices(): Promise<void> {
   if (!shutdownPromise) {
     shutdownPromise = Promise.all([
-      mysqlService.closeAll(),
+      dbService.closeAll(),
       sshService.closeAll()
     ]).then(() => undefined)
   }

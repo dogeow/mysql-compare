@@ -1,5 +1,5 @@
 // 同步：根据 SyncRequest 生成 SQL 计划，可 dry-run（仅返回 SQL）或真实执行。
-// 为了安全，所有破坏性操作（DROP / TRUNCATE）必须由用户在 UI 显式选择策略后才会出现在 plan 中。
+// 所有方言相关的 DDL / 字面量格式化都委托给目标 driver 的 Dialect。
 import { BrowserWindow } from 'electron'
 import { IPC } from '../../shared/ipc-channels'
 import type {
@@ -7,12 +7,11 @@ import type {
   SyncProgressEvent,
   SyncRequest,
   SyncStep,
-  ColumnInfo,
   TableSchema
 } from '../../shared/types'
-import { mysqlService } from './mysql-service'
+import { dbService } from './db-service'
+import type { DbDriver } from './drivers/types'
 import { schemaService } from './schema-service'
-import type { RowDataPacket } from 'mysql2'
 
 const PREVIEW_ROW_LIMIT = 50
 const INSERT_BATCH_SIZE = 200
@@ -27,6 +26,8 @@ interface PreparedTableSync {
 }
 
 interface SyncContext {
+  sourceDriver: DbDriver
+  targetDriver: DbDriver
   sourceTables: Set<string>
   targetTables: Set<string>
 }
@@ -42,7 +43,7 @@ export class SyncService {
       const sqls = [...prepared.setupSQLs]
 
       if (!prepared.skip && req.syncData) {
-        for await (const sql of this.generateInsertStatements(prepared, req)) {
+        for await (const sql of this.generateInsertStatements(prepared, req, context)) {
           sqls.push(sql)
         }
       }
@@ -75,11 +76,11 @@ export class SyncService {
         message: prepared.description
       })
 
-      const statements: AsyncIterable<string> = this.iterateStatements(prepared, req)
+      const statements = this.iterateStatements(prepared, req, context)
       for await (const sql of statements) {
         total++
         try {
-          await mysqlService.executeSQL(req.targetConnectionId, sql, req.targetDatabase)
+          await context.targetDriver.executeSQL(sql, req.targetDatabase)
           executed++
         } catch (err) {
           errors++
@@ -104,11 +105,17 @@ export class SyncService {
   }
 
   private async loadSyncContext(req: SyncRequest): Promise<SyncContext> {
+    const [sourceDriver, targetDriver] = await Promise.all([
+      dbService.getDriver(req.sourceConnectionId),
+      dbService.getDriver(req.targetConnectionId)
+    ])
     const [sourceTableList, targetTableList] = await Promise.all([
-      mysqlService.listTables(req.sourceConnectionId, req.sourceDatabase),
-      mysqlService.listTables(req.targetConnectionId, req.targetDatabase)
+      sourceDriver.listTables(req.sourceDatabase),
+      targetDriver.listTables(req.targetDatabase)
     ])
     return {
+      sourceDriver,
+      targetDriver,
       sourceTables: new Set(sourceTableList),
       targetTables: new Set(targetTableList)
     }
@@ -120,6 +127,7 @@ export class SyncService {
     context: SyncContext,
     preview: boolean
   ): Promise<PreparedTableSync> {
+    const targetDialect = context.targetDriver.dialect
     const existsInTarget = context.targetTables.has(table)
     const existsInSource = context.sourceTables.has(table)
 
@@ -129,7 +137,7 @@ export class SyncService {
         description: existsInTarget
           ? 'only in target, skipped (drop manually if intended)'
           : 'missing in both source and target, skipped',
-        schema: this.emptySchema(table),
+        schema: emptySchema(table),
         setupSQLs: [],
         skip: true
       }
@@ -157,8 +165,8 @@ export class SyncService {
       if (existsInTarget) {
         switch (req.existingTableStrategy) {
           case 'overwrite-structure':
-            setupSQLs.push(`DROP TABLE IF EXISTS ${quoteTable(req.targetDatabase, table)};`)
-            setupSQLs.push(ensureSemicolon(stripDefiner(schema.createSQL)))
+            setupSQLs.push(targetDialect.renderDropIfExists(req.targetDatabase, table))
+            setupSQLs.push(ensureSemicolon(targetDialect.stripDefiner(schema.createSQL)))
             description.push('drop & recreate target table')
             break
           case 'append-data':
@@ -167,14 +175,14 @@ export class SyncService {
             break
         }
       } else {
-        setupSQLs.push(ensureSemicolon(stripDefiner(schema.createSQL)))
+        setupSQLs.push(ensureSemicolon(targetDialect.stripDefiner(schema.createSQL)))
         description.push('create table')
       }
     }
 
     if (req.syncData) {
       if (existsInTarget && req.existingTableStrategy === 'truncate-and-import') {
-        setupSQLs.push(`TRUNCATE TABLE ${quoteTable(req.targetDatabase, table)};`)
+        setupSQLs.push(targetDialect.renderTruncate(req.targetDatabase, table))
       }
       description.push(preview ? `data preview (${PREVIEW_ROW_LIMIT} rows)` : 'data sync')
     }
@@ -189,123 +197,58 @@ export class SyncService {
     }
   }
 
-  private emptySchema(table: string): TableSchema {
-    return {
-      name: table,
-      columns: [],
-      indexes: [],
-      primaryKey: [],
-      createSQL: ''
-    }
-  }
-
   private async *iterateStatements(
     prepared: PreparedTableSync,
-    req: SyncRequest
+    req: SyncRequest,
+    context: SyncContext
   ): AsyncGenerator<string> {
     for (const sql of prepared.setupSQLs) {
       yield sql
     }
-
-    if (!req.syncData || prepared.skip) {
-      return
-    }
-
-    for await (const sql of this.generateInsertStatements(prepared, req)) {
+    if (!req.syncData || prepared.skip) return
+    for await (const sql of this.generateInsertStatements(prepared, req, context)) {
       yield sql
     }
   }
 
   private async *generateInsertStatements(
     prepared: PreparedTableSync,
-    req: SyncRequest
+    req: SyncRequest,
+    context: SyncContext
   ): AsyncGenerator<string> {
     const { schema } = prepared
-    if (schema.columns.length === 0) {
-      return
-    }
+    if (schema.columns.length === 0) return
 
-    const pool = await mysqlService.getPool(req.sourceConnectionId, req.sourceDatabase)
-    const sourceTableName = quoteTable(req.sourceDatabase, prepared.table)
-    const targetTableName = quoteTable(req.targetDatabase, prepared.table)
-    const columnList = schema.columns.map((column) => quoteIdent(column.name)).join(', ')
-    const orderClause = buildStableOrderClause(schema.columns, schema.primaryKey)
+    const targetDialect = context.targetDriver.dialect
+    const columnNames = schema.columns.map((c) => c.name)
 
-    let offset = 0
-    let remaining = prepared.dataRowLimit
-    while (remaining === undefined || remaining > 0) {
-      const batchLimit =
-        remaining === undefined ? INSERT_BATCH_SIZE : Math.min(INSERT_BATCH_SIZE, remaining)
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT ${columnList} FROM ${sourceTableName} ${orderClause} LIMIT ${batchLimit} OFFSET ${offset}`
-      )
-      if (rows.length === 0) return
-
-      yield buildInsertSQL(targetTableName, schema.columns, rows as Record<string, unknown>[])
-
-      offset += rows.length
-      if (remaining !== undefined) {
-        remaining -= rows.length
-      }
-      if (rows.length < batchLimit) return
+    for await (const batch of context.sourceDriver.streamRows({
+      database: req.sourceDatabase,
+      table: prepared.table,
+      columns: columnNames,
+      primaryKey: schema.primaryKey,
+      batchSize: INSERT_BATCH_SIZE,
+      limit: prepared.dataRowLimit
+    })) {
+      yield targetDialect.renderInsert(req.targetDatabase, prepared.table, schema.columns, batch)
     }
   }
 }
 
-function quoteIdent(name: string): string {
-  return `\`${name.replace(/`/g, '``')}\``
-}
-
-function quoteTable(database: string, table: string): string {
-  return `${quoteIdent(database)}.${quoteIdent(table)}`
-}
-
-/** SHOW CREATE TABLE 在某些环境含 DEFINER / 注释，移除以便迁移 */
-function stripDefiner(sql: string): string {
-  return sql.replace(/\sDEFINER=`[^`]+`@`[^`]+`/g, '')
+function emptySchema(table: string): TableSchema {
+  return {
+    name: table,
+    columns: [],
+    indexes: [],
+    primaryKey: [],
+    createSQL: ''
+  }
 }
 
 function ensureSemicolon(sql: string): string {
   const trimmed = sql.trim()
   if (!trimmed) return ''
   return trimmed.endsWith(';') ? trimmed : `${trimmed};`
-}
-
-function buildInsertSQL(
-  targetTableName: string,
-  columns: ColumnInfo[],
-  rows: Record<string, unknown>[]
-): string {
-  const columnList = columns.map((column) => quoteIdent(column.name)).join(', ')
-  const valuesSQL = rows
-    .map((row) => {
-      const vals = columns.map((column) => formatValue(row[column.name]))
-      return `(${vals.join(', ')})`
-    })
-    .join(',\n  ')
-  return `INSERT INTO ${targetTableName} (${columnList}) VALUES\n  ${valuesSQL};`
-}
-
-function buildStableOrderClause(columns: ColumnInfo[], primaryKey: string[]): string {
-  const stableColumns = primaryKey.length > 0 ? primaryKey : columns.map((column) => column.name)
-  if (stableColumns.length === 0) return ''
-  return `ORDER BY ${stableColumns.map((column) => `${quoteIdent(column)} ASC`).join(', ')}`
-}
-
-/** 把 JS 值转为安全的 SQL 字面量。仅用于内部生成的脚本，不接受外部 SQL 注入面 */
-function formatValue(v: unknown): string {
-  if (v === null || v === undefined) return 'NULL'
-  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : 'NULL'
-  if (typeof v === 'boolean') return v ? '1' : '0'
-  if (v instanceof Date) return `'${v.toISOString().slice(0, 19).replace('T', ' ')}'`
-  if (Buffer.isBuffer(v)) return `0x${v.toString('hex')}`
-  if (typeof v === 'object') {
-    const s = JSON.stringify(v).replace(/\\/g, '\\\\').replace(/'/g, "''")
-    return `'${s}'`
-  }
-  // 兜底：字符串类型转义单引号 + 反斜杠
-  const s = String(v).replace(/\\/g, '\\\\').replace(/'/g, "''")
-  return `'${s}'`
 }
 
 export const syncService = new SyncService()

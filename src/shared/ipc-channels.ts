@@ -6,18 +6,18 @@ export const IPC = {
   ConnectionDelete: 'connection:delete',
   ConnectionTest: 'connection:test',
 
-  // MySQL 浏览
-  ListDatabases: 'mysql:listDatabases',
-  ListTables: 'mysql:listTables',
-  QueryRows: 'mysql:queryRows',
-  InsertRow: 'mysql:insertRow',
-  UpdateRow: 'mysql:updateRow',
-  DeleteRows: 'mysql:deleteRows',
-  ExecuteSQL: 'mysql:executeSQL',
-  RenameTable: 'mysql:renameTable',
-  CopyTable: 'mysql:copyTable',
-  DropTable: 'mysql:dropTable',
-  ExportTable: 'mysql:exportTable',
+  // 数据库浏览（引擎无关）
+  ListDatabases: 'db:listDatabases',
+  ListTables: 'db:listTables',
+  QueryRows: 'db:queryRows',
+  InsertRow: 'db:insertRow',
+  UpdateRow: 'db:updateRow',
+  DeleteRows: 'db:deleteRows',
+  ExecuteSQL: 'db:executeSQL',
+  RenameTable: 'db:renameTable',
+  CopyTable: 'db:copyTable',
+  DropTable: 'db:dropTable',
+  ExportTable: 'db:exportTable',
 
   // 表结构
   GetTableSchema: 'schema:getTable',
