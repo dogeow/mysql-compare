@@ -71,7 +71,7 @@ export function Sidebar() {
   const [keyword, setKeyword] = useState('')
   const [editing, setEditing] = useState<SafeConnection | null>(null)
   const [creating, setCreating] = useState(false)
-  const [tableFilter, setTableFilter] = useState('')
+  const [tableFilters, setTableFilters] = useState<Record<string, string>>({})
   const [tableMenu, setTableMenu] = useState<TableMenuState | null>(null)
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
@@ -115,11 +115,13 @@ export function Sidebar() {
 
       const containerTop = container.getBoundingClientRect().top
       let nextContext: StickyDatabaseContext | null = null
+      let closestTop = Number.NEGATIVE_INFINITY
 
       Object.values(dbRowRefs.current).forEach((entry) => {
-        if (!entry.element) return
+        if (!entry.element || !entry.element.isConnected) return
         const top = entry.element.getBoundingClientRect().top - containerTop
-        if (top <= 4) {
+        if (top <= 4 && top > closestTop) {
+          closestTop = top
           nextContext = {
             connectionName: entry.connectionName,
             database: entry.database
@@ -134,6 +136,22 @@ export function Sidebar() {
     container.addEventListener('scroll', syncStickyDatabase)
     return () => container.removeEventListener('scroll', syncStickyDatabase)
   }, [connections, keyword, nodes])
+
+  const getDatabaseKey = (connectionId: string, database: string) => `${connectionId}:${database}`
+
+  const getTableFilter = (connectionId: string, database: string) =>
+    tableFilters[getDatabaseKey(connectionId, database)] ?? ''
+
+  const setTableFilter = (connectionId: string, database: string, value: string) => {
+    const key = getDatabaseKey(connectionId, database)
+    setTableFilters((current) => {
+      if (!value) {
+        const { [key]: _removed, ...rest } = current
+        return rest
+      }
+      return { ...current, [key]: value }
+    })
+  }
 
   const filtered = connections.filter((c) =>
     !keyword || c.name.toLowerCase().includes(keyword.toLowerCase())
@@ -424,7 +442,12 @@ export function Sidebar() {
                         <div key={db}>
                           <div
                             ref={(element) => {
-                              dbRowRefs.current[`${conn.id}:${db}`] = {
+                              const key = `${conn.id}:${db}`
+                              if (!element) {
+                                delete dbRowRefs.current[key]
+                                return
+                              }
+                              dbRowRefs.current[key] = {
                                 element,
                                 connectionName: conn.name,
                                 database: db
@@ -470,13 +493,16 @@ export function Sidebar() {
                           {dbExpanded && (
                             <div className="pl-5">
                               <Input
-                                value={tableFilter}
-                                onChange={(e) => setTableFilter(e.target.value)}
+                                value={getTableFilter(conn.id, db)}
+                                onChange={(e) => setTableFilter(conn.id, db, e.target.value)}
                                 placeholder="Filter tables"
                                 className="h-6 text-xs my-1"
                               />
                               {(node.tables[db] || [])
-                                .filter((table) => !tableFilter || table.toLowerCase().includes(tableFilter.toLowerCase()))
+                                .filter((table) => {
+                                  const filter = getTableFilter(conn.id, db)
+                                  return !filter || table.toLowerCase().includes(filter.toLowerCase())
+                                })
                                 .map((table) => (
                                   <div
                                     key={table}

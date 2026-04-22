@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Copy, Pencil } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
@@ -21,14 +21,20 @@ export function TableInfoView({ connectionId, database, table }: Props) {
   const [confirmSQL, setConfirmSQL] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const requestIdRef = useRef(0)
 
   const loadSchema = async () => {
+    const requestId = ++requestIdRef.current
     const next = await unwrap<TableSchema>(api.schema.getTable(connectionId, database, table))
+    if (requestId !== requestIdRef.current) return
     setSchema(next)
     setCommentDraft(next.tableComment ?? '')
   }
 
   useEffect(() => {
+    setSchema(null)
+    setEditing(false)
+    setConfirmSQL(null)
     loadSchema().catch((error) => showToast((error as Error).message, 'error'))
   }, [connectionId, database, table, showToast])
 
@@ -52,6 +58,8 @@ export function TableInfoView({ connectionId, database, table }: Props) {
       setBusy(false)
     }
   }
+
+  const commentChanged = schema ? commentDraft !== (schema.tableComment ?? '') : false
 
   if (!schema) {
     return <div className="p-3 text-xs text-muted-foreground">Loading...</div>
@@ -103,7 +111,7 @@ export function TableInfoView({ connectionId, database, table }: Props) {
               <Button variant="outline" onClick={() => setEditing(false)} disabled={busy}>
                 Cancel
               </Button>
-              <Button onClick={() => setConfirmSQL(pendingSQL)} disabled={busy}>
+              <Button onClick={() => setConfirmSQL(pendingSQL)} disabled={busy || !commentChanged}>
                 Review SQL
               </Button>
             </>

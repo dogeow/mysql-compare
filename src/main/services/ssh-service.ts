@@ -12,6 +12,7 @@ interface ActiveTunnel {
 
 class SSHService {
   private tunnels = new Map<string, ActiveTunnel>()
+  private pendingTunnels = new Map<string, Promise<number>>()
   private closeListeners = new Set<(connectionId: string) => void>()
 
   /** 注册隧道关闭回调，便于 mysql 连接池失效。返回反注册函数。 */
@@ -31,7 +32,19 @@ class SSHService {
     if (!conn.useSSH) throw new Error('Connection does not use SSH')
     const existing = this.tunnels.get(conn.id)
     if (existing) return existing.localPort
+    const pending = this.pendingTunnels.get(conn.id)
+    if (pending) return pending
 
+    const creation = this.createTunnel(conn)
+    this.pendingTunnels.set(conn.id, creation)
+    try {
+      return await creation
+    } finally {
+      this.pendingTunnels.delete(conn.id)
+    }
+  }
+
+  private async createTunnel(conn: ConnectionConfig): Promise<number> {
     const sshConfig: ConnectConfig = {
       host: conn.sshHost,
       port: conn.sshPort || 22,
@@ -49,17 +62,26 @@ class SSHService {
     }
 
     const client = await this.connectSSH(sshConfig)
-    const { server, port } = await this.startLocalForwardingServer(client, conn.host, conn.port)
+    try {
+      const { server, port } = await this.startLocalForwardingServer(client, conn.host, conn.port)
 
-    this.tunnels.set(conn.id, { client, server, localPort: port })
+      this.tunnels.set(conn.id, { client, server, localPort: port })
 
-    // 任一侧异常都清掉缓存，下次重新建立
-    const cleanup = () => this.close(conn.id).catch(() => undefined)
-    client.on('error', cleanup)
-    client.on('close', cleanup)
-    server.on('error', cleanup)
+      // 任一侧异常都清掉缓存，下次重新建立
+      const cleanup = () => this.close(conn.id).catch(() => undefined)
+      client.on('error', cleanup)
+      client.on('close', cleanup)
+      server.on('error', cleanup)
 
-    return port
+      return port
+    } catch (error) {
+      try {
+        client.end()
+      } catch {
+        // noop
+      }
+      throw error
+    }
   }
 
   private connectSSH(cfg: ConnectConfig): Promise<Client> {
@@ -102,6 +124,7 @@ class SSHService {
   }
 
   async close(connectionId: string): Promise<void> {
+    this.pendingTunnels.delete(connectionId)
     const t = this.tunnels.get(connectionId)
     if (!t) return
     this.tunnels.delete(connectionId)

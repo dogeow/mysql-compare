@@ -30,6 +30,8 @@ interface UIState {
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
 }
 
+type ActiveState = Pick<UIState, 'activeTabId' | 'rightView'>
+
 function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
@@ -54,11 +56,11 @@ function createTab(view: WorkspaceView): WorkspaceTab {
   }
 }
 
-function pickActiveState(tabs: WorkspaceTab[], preferredIndex: number) {
+function pickActiveState(tabs: WorkspaceTab[], preferredIndex: number): ActiveState {
   if (tabs.length === 0) {
     return {
       activeTabId: null,
-      rightView: { kind: 'empty' } as RightView
+      rightView: { kind: 'empty' }
     }
   }
   const nextIndex = Math.max(0, Math.min(preferredIndex, tabs.length - 1))

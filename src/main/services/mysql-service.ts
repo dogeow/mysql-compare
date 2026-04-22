@@ -10,6 +10,8 @@ import type {
 import { connectionStore } from '../store/connection-store'
 import { sshService } from './ssh-service'
 
+const MAX_PAGE_SIZE = 1000
+
 interface PoolEntry {
   pool: Pool
   /** 上次绑定的本地端口（SSH 时） */
@@ -18,6 +20,7 @@ interface PoolEntry {
 
 class MySQLService {
   private pools = new Map<string, PoolEntry>()
+  private pendingPools = new Map<string, Promise<PoolEntry>>()
 
   constructor() {
     sshService.onTunnelClosed((connectionId) => {
@@ -50,14 +53,28 @@ class MySQLService {
       if (database) await cached.pool.query(`USE ${quoteIdent(database)}`)
       return cached.pool
     }
+
+    const pending = this.pendingPools.get(connectionId)
+    if (pending) {
+      const entry = await pending
+      if (database) await entry.pool.query(`USE ${quoteIdent(database)}`)
+      return entry.pool
+    }
+
     if (cached) {
       this.pools.delete(connectionId)
       await cached.pool.end().catch(() => undefined)
     }
 
-    const pool = await this.createPool(conn, database)
-    this.pools.set(connectionId, { pool, localPort: activeLocalPort })
-    return pool
+    const creation = this.createPoolEntry(conn, database, activeLocalPort)
+    this.pendingPools.set(connectionId, creation)
+    try {
+      const entry = await creation
+      if (database) await entry.pool.query(`USE ${quoteIdent(database)}`)
+      return entry.pool
+    } finally {
+      this.pendingPools.delete(connectionId)
+    }
   }
 
   /** 直接基于一个临时 ConnectionConfig 测试连接（不入池） */
@@ -77,6 +94,17 @@ class MySQLService {
   private async createPool(conn: ConnectionConfig, database?: string): Promise<Pool> {
     const opts = await this.buildPoolOptions(conn, database)
     return mysql.createPool(opts)
+  }
+
+  private async createPoolEntry(
+    conn: ConnectionConfig,
+    database: string | undefined,
+    localPort: number | undefined
+  ): Promise<PoolEntry> {
+    const pool = await this.createPool(conn, database)
+    const entry = { pool, localPort }
+    this.pools.set(conn.id, entry)
+    return entry
   }
 
   private async buildPoolOptions(
@@ -159,6 +187,9 @@ class MySQLService {
     where?: string
   }) {
     const { connectionId, database, table, page, pageSize, orderBy, where } = req
+    assertNonEmptySQL(sqlFragmentLabel('database'), database)
+    assertNonEmptySQL(sqlFragmentLabel('table'), table)
+    assertSafeWhereClause(where)
     const pool = await this.getPool(connectionId, database)
     const safeTable = quoteTable(database, table)
     const whereClause = where && where.trim() ? `WHERE ${where}` : ''
@@ -166,7 +197,7 @@ class MySQLService {
       ? `ORDER BY ${quoteIdent(orderBy.column)} ${orderBy.dir}`
       : ''
     const offset = Math.max(0, (page - 1) * pageSize)
-    const limit = Math.max(1, Math.min(pageSize, 1000))
+    const limit = Math.max(1, Math.min(pageSize, MAX_PAGE_SIZE))
 
     const [rows] = await pool.query<RowDataPacket[]>(
       `SELECT * FROM ${safeTable} ${whereClause} ${orderClause} LIMIT ${limit} OFFSET ${offset}`
@@ -190,6 +221,8 @@ class MySQLService {
     const pool = await this.getPool(connectionId(req), req.database)
     const cols = Object.keys(req.values)
     if (cols.length === 0) throw new Error('No values to insert')
+    assertNonEmptySQL(sqlFragmentLabel('table'), req.table)
+    assertColumns(cols, 'insert')
     const placeholders = cols.map(() => '?').join(', ')
     const sql = `INSERT INTO ${quoteTable(req.database, req.table)}
       (${cols.map((c) => quoteIdent(c)).join(', ')})
@@ -209,6 +242,9 @@ class MySQLService {
     if (pkCols.length === 0) throw new Error('Refusing to UPDATE without primary key')
     const setCols = Object.keys(req.changes)
     if (setCols.length === 0) return { affectedRows: 0 }
+    assertNonEmptySQL(sqlFragmentLabel('table'), req.table)
+    assertColumns(pkCols, 'primary key')
+    assertColumns(setCols, 'update')
 
     const pool = await this.getPool(connectionId(req), req.database)
     const setClause = setCols.map((c) => `${quoteIdent(c)} = ?`).join(', ')
@@ -229,6 +265,7 @@ class MySQLService {
     pkRows: Record<string, unknown>[]
   }): Promise<{ affectedRows: number }> {
     if (req.pkRows.length === 0) return { affectedRows: 0 }
+    assertNonEmptySQL(sqlFragmentLabel('table'), req.table)
     const pool = await this.getPool(connectionId(req), req.database)
     const conn = await pool.getConnection()
     const tableName = quoteTable(req.database, req.table)
@@ -238,6 +275,7 @@ class MySQLService {
       for (const row of req.pkRows) {
         const cols = Object.keys(row)
         if (cols.length === 0) throw new Error('Refusing to DELETE without primary key')
+        assertColumns(cols, 'primary key')
         const where = cols.map((c) => `${quoteIdent(c)} = ?`).join(' AND ')
         const [res] = await conn.execute<ResultSetHeader>(
           `DELETE FROM ${tableName} WHERE ${where} LIMIT 1`,
@@ -301,6 +339,7 @@ class MySQLService {
 
   /** 直接执行 SQL（用于同步等高级操作） */
   async executeSQL(connectionId: string, sql: string, database?: string): Promise<unknown> {
+    if (!sql.trim()) throw new Error('SQL is required')
     const conn = connectionStore.getFull(connectionId)
     if (!conn) throw new Error(`Connection ${connectionId} not found`)
     const opts = await this.buildPoolOptions(conn, database)
@@ -316,10 +355,12 @@ class MySQLService {
   async closeAll(): Promise<void> {
     const entries = Array.from(this.pools.values())
     this.pools.clear()
+    this.pendingPools.clear()
     await Promise.all(entries.map((e) => e.pool.end().catch(() => undefined)))
   }
 
   async closeConnection(connectionId: string): Promise<void> {
+    this.pendingPools.delete(connectionId)
     const entry = this.pools.get(connectionId)
     if (entry) {
       this.pools.delete(connectionId)
@@ -339,6 +380,33 @@ function quoteIdent(name: string): string {
 
 function quoteTable(database: string, table: string): string {
   return `${quoteIdent(database)}.${quoteIdent(table)}`
+}
+
+function assertColumns(columns: string[], label: string): void {
+  for (const column of columns) {
+    assertNonEmptySQL(`${label} column`, column)
+  }
+}
+
+function assertSafeWhereClause(where?: string): void {
+  if (!where?.trim()) return
+  const trimmed = where.trim()
+  if (trimmed.includes(';')) {
+    throw new Error('WHERE clause must not contain semicolons')
+  }
+  if (/--|\/\*/.test(trimmed)) {
+    throw new Error('WHERE clause must not contain SQL comments')
+  }
+}
+
+function assertNonEmptySQL(label: string, value: string): void {
+  if (!value.trim()) {
+    throw new Error(`${label} is required`)
+  }
+}
+
+function sqlFragmentLabel(name: string): string {
+  return name.charAt(0).toUpperCase() + name.slice(1)
 }
 
 function connectionId(req: { connectionId: string }): string {

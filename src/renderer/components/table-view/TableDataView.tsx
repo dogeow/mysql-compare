@@ -1,5 +1,5 @@
 // 表数据视图：分页、where 过滤、排序、行 CRUD
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Plus, Trash2, Pencil, RefreshCw, AlertTriangle, Download } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
@@ -31,46 +31,62 @@ export function TableDataView({ connectionId, database, table }: Props) {
   const [selected, setSelected] = useState<Set<number>>(new Set())
   const [editing, setEditing] = useState<{ mode: 'insert' | 'edit'; row?: Record<string, unknown> } | null>(null)
   const [exportOpen, setExportOpen] = useState(false)
+  const [reloadToken, setReloadToken] = useState(0)
+  const requestIdRef = useRef(0)
 
-  const load = async () => {
-    setLoading(true)
-    try {
-      const r = await unwrap<QueryRowsResult>(
-        api.mysql.queryRows({
-          connectionId,
-          database,
-          table,
-          page,
-          pageSize,
-          orderBy,
-          where: appliedWhere || undefined
-        })
-      )
-      setData(r)
-      setSelected(new Set())
-    } catch (err) {
-      showToast((err as Error).message, 'error')
-    } finally {
-      setLoading(false)
-    }
-  }
+  const refresh = () => setReloadToken((current) => current + 1)
 
   useEffect(() => {
     setPage(1)
     setOrderBy(undefined)
     setWhere('')
     setAppliedWhere('')
+    setSelected(new Set())
+    setEditing(null)
+    setData(null)
   }, [connectionId, database, table])
 
   useEffect(() => {
-    load()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connectionId, database, table, page, appliedWhere, orderBy])
+    const requestId = ++requestIdRef.current
+    setLoading(true)
+
+    void (async () => {
+      try {
+        const result = await unwrap<QueryRowsResult>(
+          api.mysql.queryRows({
+            connectionId,
+            database,
+            table,
+            page,
+            pageSize,
+            orderBy,
+            where: appliedWhere || undefined
+          })
+        )
+        if (requestId !== requestIdRef.current) return
+        setData(result)
+        setSelected(new Set())
+      } catch (err) {
+        if (requestId !== requestIdRef.current) return
+        setData(null)
+        showToast((err as Error).message, 'error')
+      } finally {
+        if (requestId === requestIdRef.current) {
+          setLoading(false)
+        }
+      }
+    })()
+  }, [appliedWhere, connectionId, database, orderBy, page, pageSize, reloadToken, showToast, table])
 
   const totalPages = useMemo(
     () => (data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1),
     [data, pageSize]
   )
+
+  const applyWhere = () => {
+    setPage(1)
+    setAppliedWhere(where.trim())
+  }
 
   const onToggleSelect = (idx: number) => {
     setSelected((prev) => {
@@ -91,13 +107,14 @@ export function TableDataView({ connectionId, database, table }: Props) {
     try {
       const r = await unwrap(api.mysql.deleteRows({ connectionId, database, table, pkRows }))
       showToast(`Deleted ${(r as { affectedRows: number }).affectedRows} row(s)`, 'success')
-      load()
+      refresh()
     } catch (err) {
       showToast((err as Error).message, 'error')
     }
   }
 
   const onSort = (column: string) => {
+    setPage(1)
     setOrderBy((cur) => {
       if (!cur || cur.column !== column) return { column, dir: 'ASC' }
       if (cur.dir === 'ASC') return { column, dir: 'DESC' }
@@ -115,13 +132,18 @@ export function TableDataView({ connectionId, database, table }: Props) {
           placeholder="WHERE clause, e.g.  status = 1 AND id > 100"
           className="flex-1 h-8 text-xs"
           onKeyDown={(e) => {
-            if (e.key === 'Enter') setAppliedWhere(where)
+            if (e.key === 'Enter') applyWhere()
           }}
         />
-        <Button size="sm" variant="outline" onClick={() => setAppliedWhere(where)}>
+        <Button
+          size="sm"
+          variant="outline"
+          onClick={applyWhere}
+          disabled={where.trim() === appliedWhere}
+        >
           Apply
         </Button>
-        <Button size="sm" variant="ghost" onClick={() => load()} title="Refresh">
+        <Button size="sm" variant="ghost" onClick={refresh} title="Refresh">
           <RefreshCw className="w-4 h-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={() => setExportOpen(true)}>
@@ -151,6 +173,11 @@ export function TableDataView({ connectionId, database, table }: Props) {
       {/* 表格 */}
       <div className="flex-1 overflow-auto">
         {loading && <div className="p-3 text-xs text-muted-foreground">Loading...</div>}
+        {!loading && data && data.rows.length === 0 && (
+          <div className="p-3 text-xs text-muted-foreground">
+            No rows matched the current query.
+          </div>
+        )}
         {data && (
           <Table>
             <THead>
@@ -239,7 +266,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
                 showToast('Row updated', 'success')
               }
               setEditing(null)
-              load()
+              refresh()
             } catch (err) {
               showToast((err as Error).message, 'error')
             }

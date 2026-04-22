@@ -10,9 +10,15 @@ import { SQLQueryView } from '@renderer/components/sql/SQLQueryView'
 import { useUIStore, type WorkspaceTab } from '@renderer/store/ui-store'
 import { cn } from '@renderer/lib/utils'
 
+type TableTabKind = 'data' | 'structure' | 'info'
+
+function isTableTabKind(value: string): value is TableTabKind {
+  return value === 'data' || value === 'structure' || value === 'info'
+}
+
 export function Workspace() {
   const { workspaceTabs, activeTabId, rightView, setActiveTab, closeTab } = useUIStore()
-  const [tableTabs, setTableTabs] = useState<Record<string, 'data' | 'structure' | 'info'>>({})
+  const [tableTabs, setTableTabs] = useState<Record<string, TableTabKind>>({})
   const previousTabsRef = useRef<WorkspaceTab[]>([])
 
   useEffect(() => {
@@ -21,7 +27,7 @@ export function Workspace() {
       const alive = new Set(workspaceTabs.map((tab) => tab.id))
       const next = Object.fromEntries(
         Object.entries(current).filter(([tabId]) => alive.has(tabId))
-      ) as Record<string, 'data' | 'structure' | 'info'>
+      ) as Record<string, TableTabKind>
 
       workspaceTabs.forEach((tab, index) => {
         const previousTab = previousTabs[index]
@@ -131,9 +137,10 @@ export function Workspace() {
                   <Tabs
                     value={currentTableTab}
                     onValueChange={(value) =>
+                      isTableTabKind(value) &&
                       setTableTabs((current) => ({
                         ...current,
-                        [tab.id]: value as 'data' | 'structure' | 'info'
+                        [tab.id]: value
                       }))
                     }
                     items={[

@@ -29,6 +29,9 @@ export function registerMySQLIPC(): void {
 
   handle(IPC.QueryRows, async (req: QueryRowsRequest): Promise<QueryRowsResult> => {
     const schema = await schemaService.getTableSchema(req.connectionId, req.database, req.table)
+    if (req.orderBy && !schema.columns.some((column) => column.name === req.orderBy?.column)) {
+      throw new Error(`Unknown sort column "${req.orderBy.column}"`)
+    }
     const { rows, total } = await mysqlService.queryRows(req)
     return {
       rows,

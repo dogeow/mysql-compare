@@ -1,5 +1,5 @@
 // 新增 / 编辑连接的弹窗
-import { useRef, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Dialog } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
@@ -24,30 +24,34 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
     message: string
   } | null>(null)
   const [draggingSSHKey, setDraggingSSHKey] = useState(false)
-  const [form, setForm] = useState<ConnectionConfig>(() => ({
-    id: connection?.id || '',
-    name: connection?.name || '',
-    group: connection?.group || '',
-    host: connection?.host || '127.0.0.1',
-    port: connection?.port || 3306,
-    username: connection?.username || 'root',
-    password: '',
-    database: connection?.database || '',
-    useSSH: connection?.useSSH || false,
-    sshHost: connection?.sshHost || '',
-    sshPort: connection?.sshPort || 22,
-    sshUsername: connection?.sshUsername || '',
-    sshPassword: '',
-    sshPrivateKey: '',
-    sshPassphrase: '',
-    createdAt: connection?.createdAt || 0,
-    updatedAt: 0
-  }))
+  const [form, setForm] = useState<ConnectionConfig>(createInitialForm(connection))
   const [busy, setBusy] = useState(false)
 
-  const update = <K extends keyof ConnectionConfig>(k: K, v: ConnectionConfig[K]) => {
+  useEffect(() => {
+    if (!open) return
+    setForm(createInitialForm(connection))
+    setBusy(false)
+    setDraggingSSHKey(false)
     setTestFeedback(null)
-    setForm((f) => ({ ...f, [k]: v }))
+  }, [connection, open])
+
+  const update = <K extends keyof ConnectionConfig>(key: K, value: ConnectionConfig[K]) => {
+    setTestFeedback(null)
+    setForm((current) => {
+      if (key === 'useSSH' && !value) {
+        return {
+          ...current,
+          useSSH: false,
+          sshHost: '',
+          sshPort: 22,
+          sshUsername: '',
+          sshPassword: '',
+          sshPrivateKey: '',
+          sshPassphrase: ''
+        }
+      }
+      return { ...current, [key]: value }
+    })
   }
 
   const loadSSHKeyFile = async (file: File) => {
@@ -74,12 +78,19 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
   }
 
   const onTest = async () => {
+    const validationError = validateConnectionForm(form)
+    if (validationError) {
+      showToast(validationError, 'error')
+      setTestFeedback({ level: 'error', message: validationError })
+      return
+    }
+
     setBusy(true)
     setTestFeedback(null)
     try {
-      const r = await unwrap(api.connection.test(form))
-      setTestFeedback({ level: 'success', message: r.message })
-      showToast(r.message, 'success')
+      const result = await unwrap(api.connection.test(buildPayload(form)))
+      setTestFeedback({ level: 'success', message: result.message })
+      showToast(result.message, 'success')
     } catch (err) {
       const message = (err as Error).message
       setTestFeedback({ level: 'error', message })
@@ -90,21 +101,15 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
   }
 
   const onSave = async () => {
-    if (!form.name.trim() || !form.host.trim()) {
-      showToast('Name and host are required', 'error')
+    const validationError = validateConnectionForm(form)
+    if (validationError) {
+      showToast(validationError, 'error')
       return
     }
+
     setBusy(true)
     try {
-      // 如果用户没有输入新密码，把字段设为 undefined → 主进程保留原密文
-      const payload: ConnectionConfig = {
-        ...form,
-        password: form.password ? form.password : undefined,
-        sshPassword: form.sshPassword ? form.sshPassword : undefined,
-        sshPrivateKey: form.sshPrivateKey ? form.sshPrivateKey : undefined,
-        sshPassphrase: form.sshPassphrase ? form.sshPassphrase : undefined
-      }
-      await unwrap(api.connection.upsert(payload))
+      await unwrap(api.connection.upsert(buildPayload(form)))
       showToast('Saved', 'success')
       onSaved?.()
       onOpenChange(false)
@@ -146,8 +151,10 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
         <Field label="Port">
           <Input
             type="number"
+            min={1}
+            max={65535}
             value={form.port}
-            onChange={(e) => update('port', Number(e.target.value))}
+            onChange={(e) => update('port', parsePortValue(e.target.value, 3306))}
           />
         </Field>
         <Field label="Username">
@@ -168,7 +175,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
         </Field>
         <div />
 
-        <div className="col-span-2 flex items-center gap-2 mt-2">
+        <div className="col-span-2 mt-2 flex items-center gap-2">
           <Checkbox
             checked={form.useSSH}
             onChange={(e) => update('useSSH', e.target.checked)}
@@ -185,8 +192,10 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
             <Field label="SSH Port">
               <Input
                 type="number"
+                min={1}
+                max={65535}
                 value={form.sshPort || 22}
-                onChange={(e) => update('sshPort', Number(e.target.value))}
+                onChange={(e) => update('sshPort', parsePortValue(e.target.value, 22))}
               />
             </Field>
             <Field label="SSH Username">
@@ -202,7 +211,10 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
                 onChange={(e) => update('sshPassword', e.target.value)}
               />
             </Field>
-            <Field label={`SSH Private Key${connection?.hasSSHPrivateKey ? ' (leave blank to keep)' : ''}`} className="col-span-2">
+            <Field
+              label={`SSH Private Key${connection?.hasSSHPrivateKey ? ' (leave blank to keep)' : ''}`}
+              className="col-span-2"
+            >
               <input
                 ref={sshKeyInputRef}
                 type="file"
@@ -271,10 +283,89 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
   )
 }
 
-function Field({ label, children, className }: { label: string; children: React.ReactNode; className?: string }) {
+function createInitialForm(connection?: SafeConnection | null): ConnectionConfig {
+  return {
+    id: connection?.id || '',
+    name: connection?.name || '',
+    group: connection?.group || '',
+    host: connection?.host || '127.0.0.1',
+    port: connection?.port || 3306,
+    username: connection?.username || 'root',
+    password: '',
+    database: connection?.database || '',
+    useSSH: connection?.useSSH || false,
+    sshHost: connection?.sshHost || '',
+    sshPort: connection?.sshPort || 22,
+    sshUsername: connection?.sshUsername || '',
+    sshPassword: '',
+    sshPrivateKey: '',
+    sshPassphrase: '',
+    createdAt: connection?.createdAt || 0,
+    updatedAt: 0
+  }
+}
+
+function buildPayload(form: ConnectionConfig): ConnectionConfig {
+  return {
+    ...form,
+    name: form.name.trim(),
+    group: form.group?.trim(),
+    host: form.host.trim(),
+    username: form.username.trim(),
+    database: form.database?.trim(),
+    sshHost: form.useSSH ? form.sshHost?.trim() : undefined,
+    sshUsername: form.useSSH ? form.sshUsername?.trim() : undefined,
+    password: form.password ? form.password : undefined,
+    sshPassword: form.useSSH && form.sshPassword ? form.sshPassword : undefined,
+    sshPrivateKey: form.useSSH && form.sshPrivateKey?.trim() ? form.sshPrivateKey.trim() : undefined,
+    sshPassphrase: form.useSSH && form.sshPassphrase ? form.sshPassphrase : undefined
+  }
+}
+
+function validateConnectionForm(form: ConnectionConfig): string | null {
+  if (!form.name.trim()) return 'Name is required'
+  if (!form.host.trim()) return 'Host is required'
+  if (!form.username.trim()) return 'Username is required'
+  if (!isValidPort(form.port)) return 'Port must be between 1 and 65535'
+
+  if (!form.useSSH) return null
+
+  if (!form.sshHost?.trim()) return 'SSH host is required when SSH tunnel is enabled'
+  if (!form.sshUsername?.trim()) return 'SSH username is required when SSH tunnel is enabled'
+  if (!isValidPort(form.sshPort)) return 'SSH port must be between 1 and 65535'
+
+  const hasSSHPassword = Boolean(form.sshPassword?.trim())
+  const hasSSHKey = Boolean(form.sshPrivateKey?.trim())
+  if (!hasSSHPassword && !hasSSHKey) {
+    return 'SSH password or private key is required when SSH tunnel is enabled'
+  }
+
+  return null
+}
+
+function parsePortValue(value: string, fallback: number): number {
+  if (!value.trim()) return fallback
+  const port = Number(value)
+  return Number.isInteger(port) ? port : fallback
+}
+
+function isValidPort(value: number | undefined): boolean {
+  if (value === undefined) return false
+  return Number.isInteger(value) && value >= 1 && value <= 65535
+}
+
+function Field({
+  label,
+  children,
+  className
+}: {
+  label: string
+  children: React.ReactNode
+  className?: string
+}) {
   return (
     <div className={className}>
-      <Label className="block mb-1">{label}</Label>
+      <Label className="mb-1 block">{label}</Label>
       {children}
     </div>
   )

@@ -7,89 +7,47 @@ import type {
   SyncProgressEvent,
   SyncRequest,
   SyncStep,
-  ColumnInfo
+  ColumnInfo,
+  TableSchema
 } from '../../shared/types'
 import { mysqlService } from './mysql-service'
 import { schemaService } from './schema-service'
 import type { RowDataPacket } from 'mysql2'
 
+const PREVIEW_ROW_LIMIT = 50
+const INSERT_BATCH_SIZE = 200
+
+interface PreparedTableSync {
+  table: string
+  description: string
+  schema: TableSchema
+  setupSQLs: string[]
+  dataRowLimit?: number
+  skip: boolean
+}
+
+interface SyncContext {
+  sourceTables: Set<string>
+  targetTables: Set<string>
+}
+
 export class SyncService {
   /** 生成同步计划（不执行） */
   async buildPlan(req: SyncRequest): Promise<SyncPlan> {
     const steps: SyncStep[] = []
-    const [sourceTableList, targetTableList] = await Promise.all([
-      mysqlService.listTables(req.sourceConnectionId, req.sourceDatabase),
-      mysqlService.listTables(req.targetConnectionId, req.targetDatabase)
-    ])
-    const sourceTables = new Set(sourceTableList)
-    const targetTables = new Set(targetTableList)
-    const sourceTableName = (table: string) => quoteTable(req.sourceDatabase, table)
-    const targetTableName = (table: string) => quoteTable(req.targetDatabase, table)
+    const context = await this.loadSyncContext(req)
 
     for (const table of req.tables) {
-      const sqls: string[] = []
-      const description: string[] = []
-      const existsInTarget = targetTables.has(table)
-      const existsInSource = sourceTables.has(table)
+      const prepared = await this.prepareTableSync(table, req, context, true)
+      const sqls = [...prepared.setupSQLs]
 
-      if (!existsInSource) {
-        steps.push({
-          table,
-          description: existsInTarget
-            ? 'only in target, skipped (drop manually if intended)'
-            : 'missing in both source and target, skipped',
-          sqls: []
-        })
-        continue
-      }
-
-      const sSchema = await schemaService.getTableSchema(
-        req.sourceConnectionId,
-        req.sourceDatabase,
-        table
-      )
-
-      // ---- 结构 ----
-      if (req.syncStructure) {
-        if (existsInTarget) {
-          switch (req.existingTableStrategy) {
-            case 'skip':
-              description.push('skip existing table')
-              break
-            case 'overwrite-structure':
-              sqls.push(`DROP TABLE IF EXISTS ${targetTableName(table)};`)
-              sqls.push(stripDefiner(sSchema.createSQL) + ';')
-              description.push('drop & recreate target table')
-              break
-            case 'append-data':
-            case 'truncate-and-import':
-              description.push('keep target structure')
-              break
-          }
-        } else {
-          sqls.push(stripDefiner(sSchema.createSQL) + ';')
-          description.push('create table')
+      if (!prepared.skip && req.syncData) {
+        for await (const sql of this.generateInsertStatements(prepared, req)) {
+          sqls.push(sql)
         }
       }
 
-      // ---- 数据 ----
-      if (req.syncData) {
-        if (existsInTarget && req.existingTableStrategy === 'truncate-and-import') {
-          sqls.push(`TRUNCATE TABLE ${targetTableName(table)};`)
-        }
-        // 数据 dump 走流式插入，构建批量 INSERT；如果是 dryRun 只取前 N 行示意
-        const sample = await this.dumpInserts(
-          req.sourceConnectionId,
-          sourceTableName(table),
-          targetTableName(table),
-          sSchema.columns,
-          req.dryRun ? 50 : Number.MAX_SAFE_INTEGER
-        )
-        sqls.push(...sample)
-        description.push(req.dryRun ? 'data preview (50 rows)' : 'data sync')
-      }
-
-      steps.push({ table, description: description.join(', ') || 'noop', sqls })
+      steps.push({ table, description: prepared.description, sqls })
     }
 
     return { steps }
@@ -97,25 +55,36 @@ export class SyncService {
 
   /** 真实执行：在目标库依次跑 SQL，并通过 SyncProgress 事件汇报进度 */
   async execute(req: SyncRequest): Promise<{ executed: number; errors: number }> {
-    const plan = await this.buildPlan({ ...req, dryRun: false })
     const win = BrowserWindow.getAllWindows()[0]
     const emit = (e: SyncProgressEvent) => win?.webContents.send(IPC.SyncProgress, e)
+    const context = await this.loadSyncContext(req)
 
     let executed = 0
     let errors = 0
-    const total = plan.steps.reduce((s, x) => s + x.sqls.length, 0)
     let done = 0
+    let total = 0
 
-    for (const step of plan.steps) {
-      emit({ table: step.table, step: 'start', done, total, level: 'info', message: step.description })
-      for (const sql of step.sqls) {
+    for (const table of req.tables) {
+      const prepared = await this.prepareTableSync(table, req, context, false)
+      emit({
+        table: prepared.table,
+        step: 'start',
+        done,
+        total,
+        level: 'info',
+        message: prepared.description
+      })
+
+      const statements: AsyncIterable<string> = this.iterateStatements(prepared, req)
+      for await (const sql of statements) {
+        total++
         try {
           await mysqlService.executeSQL(req.targetConnectionId, sql, req.targetDatabase)
           executed++
         } catch (err) {
           errors++
           emit({
-            table: step.table,
+            table: prepared.table,
             step: 'error',
             done,
             total,
@@ -125,42 +94,161 @@ export class SyncService {
         }
         done++
         if (done % 20 === 0 || done === total) {
-          emit({ table: step.table, step: 'progress', done, total, level: 'info' })
+          emit({ table: prepared.table, step: 'progress', done, total, level: 'info' })
         }
       }
-      emit({ table: step.table, step: 'done', done, total, level: 'info' })
+      emit({ table: prepared.table, step: 'done', done, total, level: 'info' })
     }
 
     return { executed, errors }
   }
 
-  private async dumpInserts(
-    connectionId: string,
-    sourceTableName: string,
-    targetTableName: string,
-    columns: ColumnInfo[],
-    limit: number
-  ): Promise<string[]> {
-    const pool = await mysqlService.getPool(connectionId)
-    const colNames = columns.map((c) => `\`${c.name}\``).join(', ')
-    const limitClause = limit !== Number.MAX_SAFE_INTEGER ? `LIMIT ${limit}` : ''
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT ${colNames} FROM ${sourceTableName} ${limitClause}`
-    )
-    if (rows.length === 0) return []
-    const sqls: string[] = []
-    const batchSize = 200
-    for (let i = 0; i < rows.length; i += batchSize) {
-      const chunk = rows.slice(i, i + batchSize)
-      const valuesSQL = chunk
-        .map((row) => {
-          const vals = columns.map((c) => formatValue(row[c.name]))
-          return `(${vals.join(', ')})`
-        })
-        .join(',\n  ')
-      sqls.push(`INSERT INTO ${targetTableName} (${colNames}) VALUES\n  ${valuesSQL};`)
+  private async loadSyncContext(req: SyncRequest): Promise<SyncContext> {
+    const [sourceTableList, targetTableList] = await Promise.all([
+      mysqlService.listTables(req.sourceConnectionId, req.sourceDatabase),
+      mysqlService.listTables(req.targetConnectionId, req.targetDatabase)
+    ])
+    return {
+      sourceTables: new Set(sourceTableList),
+      targetTables: new Set(targetTableList)
     }
-    return sqls
+  }
+
+  private async prepareTableSync(
+    table: string,
+    req: SyncRequest,
+    context: SyncContext,
+    preview: boolean
+  ): Promise<PreparedTableSync> {
+    const existsInTarget = context.targetTables.has(table)
+    const existsInSource = context.sourceTables.has(table)
+
+    if (!existsInSource) {
+      return {
+        table,
+        description: existsInTarget
+          ? 'only in target, skipped (drop manually if intended)'
+          : 'missing in both source and target, skipped',
+        schema: this.emptySchema(table),
+        setupSQLs: [],
+        skip: true
+      }
+    }
+
+    const schema = await schemaService.getTableSchema(
+      req.sourceConnectionId,
+      req.sourceDatabase,
+      table
+    )
+    const setupSQLs: string[] = []
+    const description: string[] = []
+
+    if (existsInTarget && req.existingTableStrategy === 'skip') {
+      return {
+        table,
+        description: 'skip existing table',
+        schema,
+        setupSQLs,
+        skip: true
+      }
+    }
+
+    if (req.syncStructure) {
+      if (existsInTarget) {
+        switch (req.existingTableStrategy) {
+          case 'overwrite-structure':
+            setupSQLs.push(`DROP TABLE IF EXISTS ${quoteTable(req.targetDatabase, table)};`)
+            setupSQLs.push(ensureSemicolon(stripDefiner(schema.createSQL)))
+            description.push('drop & recreate target table')
+            break
+          case 'append-data':
+          case 'truncate-and-import':
+            description.push('keep target structure')
+            break
+        }
+      } else {
+        setupSQLs.push(ensureSemicolon(stripDefiner(schema.createSQL)))
+        description.push('create table')
+      }
+    }
+
+    if (req.syncData) {
+      if (existsInTarget && req.existingTableStrategy === 'truncate-and-import') {
+        setupSQLs.push(`TRUNCATE TABLE ${quoteTable(req.targetDatabase, table)};`)
+      }
+      description.push(preview ? `data preview (${PREVIEW_ROW_LIMIT} rows)` : 'data sync')
+    }
+
+    return {
+      table,
+      description: description.join(', ') || 'noop',
+      schema,
+      setupSQLs,
+      dataRowLimit: preview && req.syncData ? PREVIEW_ROW_LIMIT : undefined,
+      skip: false
+    }
+  }
+
+  private emptySchema(table: string): TableSchema {
+    return {
+      name: table,
+      columns: [],
+      indexes: [],
+      primaryKey: [],
+      createSQL: ''
+    }
+  }
+
+  private async *iterateStatements(
+    prepared: PreparedTableSync,
+    req: SyncRequest
+  ): AsyncGenerator<string> {
+    for (const sql of prepared.setupSQLs) {
+      yield sql
+    }
+
+    if (!req.syncData || prepared.skip) {
+      return
+    }
+
+    for await (const sql of this.generateInsertStatements(prepared, req)) {
+      yield sql
+    }
+  }
+
+  private async *generateInsertStatements(
+    prepared: PreparedTableSync,
+    req: SyncRequest
+  ): AsyncGenerator<string> {
+    const { schema } = prepared
+    if (schema.columns.length === 0) {
+      return
+    }
+
+    const pool = await mysqlService.getPool(req.sourceConnectionId, req.sourceDatabase)
+    const sourceTableName = quoteTable(req.sourceDatabase, prepared.table)
+    const targetTableName = quoteTable(req.targetDatabase, prepared.table)
+    const columnList = schema.columns.map((column) => quoteIdent(column.name)).join(', ')
+    const orderClause = buildStableOrderClause(schema.columns, schema.primaryKey)
+
+    let offset = 0
+    let remaining = prepared.dataRowLimit
+    while (remaining === undefined || remaining > 0) {
+      const batchLimit =
+        remaining === undefined ? INSERT_BATCH_SIZE : Math.min(INSERT_BATCH_SIZE, remaining)
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT ${columnList} FROM ${sourceTableName} ${orderClause} LIMIT ${batchLimit} OFFSET ${offset}`
+      )
+      if (rows.length === 0) return
+
+      yield buildInsertSQL(targetTableName, schema.columns, rows as Record<string, unknown>[])
+
+      offset += rows.length
+      if (remaining !== undefined) {
+        remaining -= rows.length
+      }
+      if (rows.length < batchLimit) return
+    }
   }
 }
 
@@ -175,6 +263,33 @@ function quoteTable(database: string, table: string): string {
 /** SHOW CREATE TABLE 在某些环境含 DEFINER / 注释，移除以便迁移 */
 function stripDefiner(sql: string): string {
   return sql.replace(/\sDEFINER=`[^`]+`@`[^`]+`/g, '')
+}
+
+function ensureSemicolon(sql: string): string {
+  const trimmed = sql.trim()
+  if (!trimmed) return ''
+  return trimmed.endsWith(';') ? trimmed : `${trimmed};`
+}
+
+function buildInsertSQL(
+  targetTableName: string,
+  columns: ColumnInfo[],
+  rows: Record<string, unknown>[]
+): string {
+  const columnList = columns.map((column) => quoteIdent(column.name)).join(', ')
+  const valuesSQL = rows
+    .map((row) => {
+      const vals = columns.map((column) => formatValue(row[column.name]))
+      return `(${vals.join(', ')})`
+    })
+    .join(',\n  ')
+  return `INSERT INTO ${targetTableName} (${columnList}) VALUES\n  ${valuesSQL};`
+}
+
+function buildStableOrderClause(columns: ColumnInfo[], primaryKey: string[]): string {
+  const stableColumns = primaryKey.length > 0 ? primaryKey : columns.map((column) => column.name)
+  if (stableColumns.length === 0) return ''
+  return `ORDER BY ${stableColumns.map((column) => `${quoteIdent(column)} ASC`).join(', ')}`
 }
 
 /** 把 JS 值转为安全的 SQL 字面量。仅用于内部生成的脚本，不接受外部 SQL 注入面 */

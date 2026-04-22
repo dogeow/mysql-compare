@@ -13,6 +13,7 @@ export class ExportService {
     this.validate(req)
 
     const schema = await schemaService.getTableSchema(req.connectionId, req.database, req.table)
+    this.validateQueryOptions(req, schema.columns)
     const filePath = await this.pickFilePath(req)
     if (!filePath) {
       return { canceled: true, rowsExported: 0 }
@@ -67,6 +68,21 @@ export class ExportService {
     if (req.scope === 'page') {
       if (!req.page || req.page < 1) throw new Error('Page export requires a valid page number')
       if (!req.pageSize || req.pageSize < 1) throw new Error('Page export requires page size')
+    }
+  }
+
+  private validateQueryOptions(req: ExportTableRequest, columns: ColumnInfo[]): void {
+    if (req.where?.trim()) {
+      const where = req.where.trim()
+      if (where.includes(';')) throw new Error('WHERE clause must not contain semicolons')
+      if (/--|\/\*/.test(where)) throw new Error('WHERE clause must not contain SQL comments')
+    }
+
+    if (req.orderBy) {
+      const allowedColumns = new Set(columns.map((column) => column.name))
+      if (!allowedColumns.has(req.orderBy.column)) {
+        throw new Error(`Unknown sort column "${req.orderBy.column}"`)
+      }
     }
   }
 

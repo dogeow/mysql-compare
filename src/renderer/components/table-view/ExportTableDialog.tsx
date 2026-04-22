@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { Dialog } from '@renderer/components/ui/dialog'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
@@ -51,6 +51,15 @@ export function ExportTableDialog({
     () => availableScopes.map((value) => ({ value, label: scopeLabels[value] })),
     [availableScopes]
   )
+
+  useEffect(() => {
+    if (!open) return
+    setFormat('sql')
+    setScope(availableScopes[0] ?? 'all')
+    setIncludeCreateTable(true)
+    setIncludeData(true)
+    setIncludeHeaders(true)
+  }, [availableScopes, connectionId, database, open, table])
 
   const canExport = format === 'sql' ? includeCreateTable || includeData : true
 
