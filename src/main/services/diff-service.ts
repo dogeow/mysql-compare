@@ -9,7 +9,8 @@ import type {
   TableDiff
 } from '../../shared/types'
 import { dbService } from './db-service'
-import { schemaService } from './schema-service'
+
+const TABLE_SCHEMA_DIFF_CONCURRENCY = 4
 
 export class DiffService {
   async diffDatabases(
@@ -27,35 +28,87 @@ export class DiffService {
       tDriver.listTables(targetDatabase)
     ])
     const all = Array.from(new Set([...sTables, ...tTables])).sort()
-    const tableDiffs: TableDiff[] = []
-    for (const table of all) {
-      const inS = sTables.includes(table)
-      const inT = tTables.includes(table)
-      if (inS && !inT) {
-        tableDiffs.push({ table, kind: 'only-in-source', columnDiffs: [], indexDiffs: [] })
-        continue
-      }
-      if (!inS && inT) {
-        tableDiffs.push({ table, kind: 'only-in-target', columnDiffs: [], indexDiffs: [] })
-        continue
-      }
-      const [sSchema, tSchema] = await Promise.all([
-        schemaService.getTableSchema(sourceConnectionId, sourceDatabase, table),
-        schemaService.getTableSchema(targetConnectionId, targetDatabase, table)
-      ])
-      const columnDiffs = diffColumns(sSchema.columns, tSchema.columns)
-      const indexDiffs = diffIndexes(sSchema.indexes, tSchema.indexes)
-      const kind = columnDiffs.length === 0 && indexDiffs.length === 0
-        ? 'modified' // 实际相同; 调用方可根据 diffs 是否为空判断
-        : 'modified'
-      // 仅当有差异才加入
-      if (columnDiffs.length > 0 || indexDiffs.length > 0) {
-        tableDiffs.push({ table, kind, columnDiffs, indexDiffs })
-      }
-    }
+    const sourceTableSet = new Set(sTables)
+    const targetTableSet = new Set(tTables)
+    const tableDiffs = await mapWithConcurrencyLimit<string, TableDiff | null>(
+      all,
+      TABLE_SCHEMA_DIFF_CONCURRENCY,
+      async (table) => {
+        const inSource = sourceTableSet.has(table)
+        const inTarget = targetTableSet.has(table)
 
-    return { sourceDatabase, targetDatabase, tableDiffs }
+        if (inSource && !inTarget) {
+          return { table, kind: 'only-in-source', columnDiffs: [], indexDiffs: [] } satisfies TableDiff
+        }
+
+        if (!inSource && inTarget) {
+          return { table, kind: 'only-in-target', columnDiffs: [], indexDiffs: [] } satisfies TableDiff
+        }
+
+        const [sourceSchema, targetSchema] = await Promise.all([
+          sDriver.getTableSchema(sourceDatabase, table),
+          tDriver.getTableSchema(targetDatabase, table)
+        ])
+        const columnDiffs = diffColumns(sourceSchema.columns, targetSchema.columns)
+        const indexDiffs = diffIndexes(sourceSchema.indexes, targetSchema.indexes)
+
+        if (columnDiffs.length === 0 && indexDiffs.length === 0) {
+          return null
+        }
+
+        return { table, kind: 'modified', columnDiffs, indexDiffs } satisfies TableDiff
+      }
+    )
+
+    return {
+      sourceDatabase,
+      targetDatabase,
+      tableDiffs: tableDiffs.filter(isTableDiff)
+    }
   }
+}
+
+function isTableDiff(tableDiff: TableDiff | null): tableDiff is TableDiff {
+  return tableDiff !== null
+}
+
+async function mapWithConcurrencyLimit<T, TResult>(
+  items: readonly T[],
+  concurrency: number,
+  mapper: (item: T, index: number) => Promise<TResult>
+): Promise<TResult[]> {
+  if (items.length === 0) return []
+
+  const results = new Array<TResult>(items.length)
+  const workerCount = Math.min(Math.max(concurrency, 1), items.length)
+  let nextIndex = 0
+  let firstError: unknown = undefined
+
+  // 每个表会同时打到源库和目标库，限制并发可以避免把连接池瞬间打满。
+  await Promise.all(
+    Array.from({ length: workerCount }, async () => {
+      while (nextIndex < items.length && firstError === undefined) {
+        const currentIndex = nextIndex
+        nextIndex += 1
+        const item = items[currentIndex]
+        if (item === undefined) {
+          return
+        }
+        try {
+          results[currentIndex] = await mapper(item, currentIndex)
+        } catch (error) {
+          firstError = error
+          return
+        }
+      }
+    })
+  )
+
+  if (firstError !== undefined) {
+    throw firstError
+  }
+
+  return results
 }
 
 function diffColumns(a: ColumnInfo[], b: ColumnInfo[]): ColumnDiff[] {

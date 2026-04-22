@@ -1,4 +1,4 @@
-// MySQL 驱动实现。一个实例对应一个 connectionId，内部维护单个 mysql2 Pool。
+// MySQL 驱动实现。一个实例对应一个 connectionId，按 database 维护 mysql2 Pool。
 import mysql, { Pool, PoolOptions, RowDataPacket, ResultSetHeader } from 'mysql2/promise'
 import type {
   ColumnInfo,
@@ -17,14 +17,43 @@ import type { DbDriver, Dialect, StreamRowsOptions } from './types'
 import { buildMySQLOrderClause, mysqlDialect } from './mysql-dialect'
 
 const MAX_PAGE_SIZE = 1000
+const MAX_CACHED_DATABASE_POOLS = 8
+
+interface PoolEntry {
+  pool: Pool
+  activeUsers: number
+}
+
+interface PoolDebugStats {
+  createdPools: number
+  reusedPools: number
+  evictedPools: number
+  skippedEvictions: number
+}
+
+export interface MySQLDriverPoolDebugSnapshot {
+  connectionId: string
+  cachedPools: number
+  maxCachedPools: number
+  stats: PoolDebugStats
+  entries: Array<{
+    database: string
+    activeUsers: number
+  }>
+}
 
 export class MySQLDriver implements DbDriver {
   readonly engine = 'mysql' as const
   readonly dialect: Dialect = mysqlDialect
   readonly connectionId: string
 
-  private pool: Pool | null = null
-  private currentDatabase: string | undefined
+  private pools = new Map<string, PoolEntry>()
+  private readonly poolDebugStats: PoolDebugStats = {
+    createdPools: 0,
+    reusedPools: 0,
+    evictedPools: 0,
+    skippedEvictions: 0
+  }
   private readonly connection: ConnectionConfig
   private readonly localPort: number | undefined
 
@@ -50,16 +79,80 @@ export class MySQLDriver implements DbDriver {
     }
   }
 
-  private async getPool(database?: string): Promise<Pool> {
-    if (!this.pool) {
-      this.pool = mysql.createPool(this.buildPoolOptions(database))
-      this.currentDatabase = database
+  private async acquirePool(database?: string): Promise<{ pool: Pool; release: () => void }> {
+    const key = database ?? this.connection.database ?? '__default__'
+    const cached = this.pools.get(key)
+    if (cached) {
+      this.poolDebugStats.reusedPools += 1
+      this.touchPool(key, cached)
+      cached.activeUsers += 1
+      return this.createLease(cached)
     }
-    if (database && database !== this.currentDatabase) {
-      await this.pool.query(`USE ${this.dialect.quoteIdent(database)}`)
-      this.currentDatabase = database
+
+    await this.evictIdlePoolsIfNeeded()
+
+    const entry: PoolEntry = {
+      pool: mysql.createPool(this.buildPoolOptions(database)),
+      activeUsers: 1
     }
-    return this.pool
+    this.poolDebugStats.createdPools += 1
+    this.pools.set(key, entry)
+    return this.createLease(entry)
+  }
+
+  getPoolDebugSnapshot(): MySQLDriverPoolDebugSnapshot {
+    return {
+      connectionId: this.connectionId,
+      cachedPools: this.pools.size,
+      maxCachedPools: MAX_CACHED_DATABASE_POOLS,
+      stats: { ...this.poolDebugStats },
+      entries: Array.from(this.pools.entries(), ([database, entry]) => ({
+        database,
+        activeUsers: entry.activeUsers
+      }))
+    }
+  }
+
+  private createLease(entry: PoolEntry): { pool: Pool; release: () => void } {
+    let released = false
+
+    return {
+      pool: entry.pool,
+      release: () => {
+        if (released) return
+        released = true
+        entry.activeUsers = Math.max(0, entry.activeUsers - 1)
+      }
+    }
+  }
+
+  private async withPool<T>(database: string | undefined, run: (pool: Pool) => Promise<T>): Promise<T> {
+    const lease = await this.acquirePool(database)
+    try {
+      return await run(lease.pool)
+    } finally {
+      lease.release()
+    }
+  }
+
+  private touchPool(key: string, entry: PoolEntry): void {
+    this.pools.delete(key)
+    this.pools.set(key, entry)
+  }
+
+  private async evictIdlePoolsIfNeeded(): Promise<void> {
+    while (this.pools.size >= MAX_CACHED_DATABASE_POOLS) {
+      const oldestIdle = Array.from(this.pools.entries()).find(([, entry]) => entry.activeUsers === 0)
+      if (!oldestIdle) {
+        this.poolDebugStats.skippedEvictions += 1
+        return
+      }
+
+      const [oldestKey, oldestEntry] = oldestIdle
+      this.pools.delete(oldestKey)
+      this.poolDebugStats.evictedPools += 1
+      await oldestEntry.pool.end().catch(() => undefined)
+    }
   }
 
   async testConnection(): Promise<string> {
@@ -74,103 +167,105 @@ export class MySQLDriver implements DbDriver {
   }
 
   async listDatabases(): Promise<string[]> {
-    const pool = await this.getPool()
-    const [rows] = await pool.query<RowDataPacket[]>('SHOW DATABASES')
-    return rows
-      .map((r) => Object.values(r)[0] as string)
-      .filter((d) => !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(d))
+    return this.withPool(undefined, async (pool) => {
+      const [rows] = await pool.query<RowDataPacket[]>('SHOW DATABASES')
+      return rows
+        .map((r) => Object.values(r)[0] as string)
+        .filter((d) => !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(d))
+    })
   }
 
   async listTables(database: string): Promise<string[]> {
-    const pool = await this.getPool(database)
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT TABLE_NAME FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
-       ORDER BY TABLE_NAME`,
-      [database]
-    )
-    return rows.map((r) => r['TABLE_NAME'] as string)
+    return this.withPool(database, async (pool) => {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT TABLE_NAME FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
+         ORDER BY TABLE_NAME`,
+        [database]
+      )
+      return rows.map((r) => r['TABLE_NAME'] as string)
+    })
   }
 
   async getTableSchema(database: string, table: string): Promise<TableSchema> {
-    const pool = await this.getPool(database)
+    return this.withPool(database, async (pool) => {
+      const [colRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
+                COLUMN_KEY, EXTRA, COLUMN_COMMENT
+         FROM information_schema.COLUMNS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+         ORDER BY ORDINAL_POSITION`,
+        [database, table]
+      )
 
-    const [colRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
-              COLUMN_KEY, EXTRA, COLUMN_COMMENT
-       FROM information_schema.COLUMNS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-       ORDER BY ORDINAL_POSITION`,
-      [database, table]
-    )
+      const columns: ColumnInfo[] = colRows.map((r) => ({
+        name: r['COLUMN_NAME'] as string,
+        type: r['COLUMN_TYPE'] as string,
+        nullable: (r['IS_NULLABLE'] as string) === 'YES',
+        defaultValue: (r['COLUMN_DEFAULT'] as string | null) ?? null,
+        isPrimaryKey: r['COLUMN_KEY'] === 'PRI',
+        isAutoIncrement:
+          typeof r['EXTRA'] === 'string' && r['EXTRA'].includes('auto_increment'),
+        comment: (r['COLUMN_COMMENT'] as string) || '',
+        columnKey: (r['COLUMN_KEY'] as string) || ''
+      }))
 
-    const columns: ColumnInfo[] = colRows.map((r) => ({
-      name: r['COLUMN_NAME'] as string,
-      type: r['COLUMN_TYPE'] as string,
-      nullable: (r['IS_NULLABLE'] as string) === 'YES',
-      defaultValue: (r['COLUMN_DEFAULT'] as string | null) ?? null,
-      isPrimaryKey: r['COLUMN_KEY'] === 'PRI',
-      isAutoIncrement:
-        typeof r['EXTRA'] === 'string' && r['EXTRA'].includes('auto_increment'),
-      comment: (r['COLUMN_COMMENT'] as string) || '',
-      columnKey: (r['COLUMN_KEY'] as string) || ''
-    }))
-
-    const [idxRows] = await pool.query<RowDataPacket[]>(
-      `SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, COLUMN_NAME, SEQ_IN_INDEX
-       FROM information_schema.STATISTICS
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-       ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
-      [database, table]
-    )
-    const indexMap = new Map<string, IndexInfo>()
-    for (const r of idxRows) {
-      const name = r['INDEX_NAME'] as string
-      if (!indexMap.has(name)) {
-        indexMap.set(name, {
-          name,
-          columns: [],
-          unique: r['NON_UNIQUE'] === 0 || r['NON_UNIQUE'] === '0',
-          type: (r['INDEX_TYPE'] as string) || 'BTREE'
-        })
+      const [idxRows] = await pool.query<RowDataPacket[]>(
+        `SELECT INDEX_NAME, NON_UNIQUE, INDEX_TYPE, COLUMN_NAME, SEQ_IN_INDEX
+         FROM information_schema.STATISTICS
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+         ORDER BY INDEX_NAME, SEQ_IN_INDEX`,
+        [database, table]
+      )
+      const indexMap = new Map<string, IndexInfo>()
+      for (const r of idxRows) {
+        const name = r['INDEX_NAME'] as string
+        if (!indexMap.has(name)) {
+          indexMap.set(name, {
+            name,
+            columns: [],
+            unique: r['NON_UNIQUE'] === 0 || r['NON_UNIQUE'] === '0',
+            type: (r['INDEX_TYPE'] as string) || 'BTREE'
+          })
+        }
+        indexMap.get(name)!.columns.push(r['COLUMN_NAME'] as string)
       }
-      indexMap.get(name)!.columns.push(r['COLUMN_NAME'] as string)
-    }
-    const indexes = Array.from(indexMap.values())
-    const primaryKey = indexes.find((i) => i.name === 'PRIMARY')?.columns ?? []
+      const indexes = Array.from(indexMap.values())
+      const primaryKey = indexes.find((i) => i.name === 'PRIMARY')?.columns ?? []
 
-    const [createRows] = await pool.query<RowDataPacket[]>(
-      `SHOW CREATE TABLE ${this.dialect.quoteTable(database, table)}`
-    )
-    const createSQL = (createRows[0]?.['Create Table'] as string) || ''
+      const [createRows] = await pool.query<RowDataPacket[]>(
+        `SHOW CREATE TABLE ${this.dialect.quoteTable(database, table)}`
+      )
+      const createSQL = (createRows[0]?.['Create Table'] as string) || ''
 
-    const [statRows] = await pool.query<RowDataPacket[]>(
-      `SELECT TABLE_ROWS, ENGINE, TABLE_COLLATION, TABLE_COMMENT,
-              DATA_LENGTH, INDEX_LENGTH, DATA_FREE, AVG_ROW_LENGTH,
-              AUTO_INCREMENT, CREATE_TIME, UPDATE_TIME
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
-      [database, table]
-    )
+      const [statRows] = await pool.query<RowDataPacket[]>(
+        `SELECT TABLE_ROWS, ENGINE, TABLE_COLLATION, TABLE_COMMENT,
+                DATA_LENGTH, INDEX_LENGTH, DATA_FREE, AVG_ROW_LENGTH,
+                AUTO_INCREMENT, CREATE_TIME, UPDATE_TIME
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?`,
+        [database, table]
+      )
 
-    return {
-      name: table,
-      columns,
-      indexes,
-      primaryKey,
-      createSQL,
-      rowEstimate: Number(statRows[0]?.['TABLE_ROWS'] ?? 0),
-      engine: statRows[0]?.['ENGINE'] as string,
-      charset: statRows[0]?.['TABLE_COLLATION'] as string,
-      tableComment: (statRows[0]?.['TABLE_COMMENT'] as string) || '',
-      dataLength: Number(statRows[0]?.['DATA_LENGTH'] ?? 0),
-      indexLength: Number(statRows[0]?.['INDEX_LENGTH'] ?? 0),
-      dataFree: Number(statRows[0]?.['DATA_FREE'] ?? 0),
-      avgRowLength: Number(statRows[0]?.['AVG_ROW_LENGTH'] ?? 0),
-      autoIncrement: (statRows[0]?.['AUTO_INCREMENT'] as number | null | undefined) ?? null,
-      createdAt: (statRows[0]?.['CREATE_TIME'] as string | null | undefined) ?? null,
-      updatedAt: (statRows[0]?.['UPDATE_TIME'] as string | null | undefined) ?? null
-    }
+      return {
+        name: table,
+        columns,
+        indexes,
+        primaryKey,
+        createSQL,
+        rowEstimate: Number(statRows[0]?.['TABLE_ROWS'] ?? 0),
+        engine: statRows[0]?.['ENGINE'] as string,
+        charset: statRows[0]?.['TABLE_COLLATION'] as string,
+        tableComment: (statRows[0]?.['TABLE_COMMENT'] as string) || '',
+        dataLength: Number(statRows[0]?.['DATA_LENGTH'] ?? 0),
+        indexLength: Number(statRows[0]?.['INDEX_LENGTH'] ?? 0),
+        dataFree: Number(statRows[0]?.['DATA_FREE'] ?? 0),
+        avgRowLength: Number(statRows[0]?.['AVG_ROW_LENGTH'] ?? 0),
+        autoIncrement: (statRows[0]?.['AUTO_INCREMENT'] as number | null | undefined) ?? null,
+        createdAt: (statRows[0]?.['CREATE_TIME'] as string | null | undefined) ?? null,
+        updatedAt: (statRows[0]?.['UPDATE_TIME'] as string | null | undefined) ?? null
+      }
+    })
   }
 
   async queryRows(req: QueryRowsRequest) {
@@ -178,25 +273,26 @@ export class MySQLDriver implements DbDriver {
     assertNonEmptySQL('table', req.table)
     assertSafeWhereClause(req.where)
 
-    const pool = await this.getPool(req.database)
-    const safeTable = this.dialect.quoteTable(req.database, req.table)
-    const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
-    const orderClause = req.orderBy
-      ? `ORDER BY ${this.dialect.quoteIdent(req.orderBy.column)} ${req.orderBy.dir}`
-      : ''
-    const offset = Math.max(0, (req.page - 1) * req.pageSize)
-    const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))
+    return this.withPool(req.database, async (pool) => {
+      const safeTable = this.dialect.quoteTable(req.database, req.table)
+      const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
+      const orderClause = req.orderBy
+        ? `ORDER BY ${this.dialect.quoteIdent(req.orderBy.column)} ${req.orderBy.dir}`
+        : ''
+      const offset = Math.max(0, (req.page - 1) * req.pageSize)
+      const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))
 
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT * FROM ${safeTable} ${whereClause} ${orderClause} LIMIT ${limit} OFFSET ${offset}`
-    )
-    const [countRows] = await pool.query<RowDataPacket[]>(
-      `SELECT COUNT(*) AS c FROM ${safeTable} ${whereClause}`
-    )
-    return {
-      rows: rows as Record<string, unknown>[],
-      total: Number(countRows[0]?.['c'] ?? 0)
-    }
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT * FROM ${safeTable} ${whereClause} ${orderClause} LIMIT ${limit} OFFSET ${offset}`
+      )
+      const [countRows] = await pool.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS c FROM ${safeTable} ${whereClause}`
+      )
+      return {
+        rows: rows as Record<string, unknown>[],
+        total: Number(countRows[0]?.['c'] ?? 0)
+      }
+    })
   }
 
   async insertRow(req: InsertRowRequest): Promise<{ insertId: number | string; affectedRows: number }> {
@@ -205,13 +301,14 @@ export class MySQLDriver implements DbDriver {
     assertNonEmptySQL('table', req.table)
     assertColumns(cols, 'insert')
 
-    const pool = await this.getPool(req.database)
-    const placeholders = cols.map(() => '?').join(', ')
-    const sql = `INSERT INTO ${this.dialect.quoteTable(req.database, req.table)}
-      (${cols.map((c) => this.dialect.quoteIdent(c)).join(', ')})
-      VALUES (${placeholders})`
-    const [res] = await pool.execute<ResultSetHeader>(sql, cols.map((c) => req.values[c]))
-    return { insertId: res.insertId, affectedRows: res.affectedRows }
+    return this.withPool(req.database, async (pool) => {
+      const placeholders = cols.map(() => '?').join(', ')
+      const sql = `INSERT INTO ${this.dialect.quoteTable(req.database, req.table)}
+        (${cols.map((c) => this.dialect.quoteIdent(c)).join(', ')})
+        VALUES (${placeholders})`
+      const [res] = await pool.execute<ResultSetHeader>(sql, cols.map((c) => req.values[c]))
+      return { insertId: res.insertId, affectedRows: res.affectedRows }
+    })
   }
 
   async updateRow(req: UpdateRowRequest): Promise<{ affectedRows: number }> {
@@ -223,47 +320,49 @@ export class MySQLDriver implements DbDriver {
     assertColumns(pkCols, 'primary key')
     assertColumns(setCols, 'update')
 
-    const pool = await this.getPool(req.database)
-    const setClause = setCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(', ')
-    const whereClause = pkCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(' AND ')
-    const sql = `UPDATE ${this.dialect.quoteTable(req.database, req.table)} SET ${setClause} WHERE ${whereClause} LIMIT 1`
-    const params = [
-      ...setCols.map((c) => req.changes[c]),
-      ...pkCols.map((c) => req.pkValues[c])
-    ]
-    const [res] = await pool.execute<ResultSetHeader>(sql, params)
-    return { affectedRows: res.affectedRows }
+    return this.withPool(req.database, async (pool) => {
+      const setClause = setCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(', ')
+      const whereClause = pkCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(' AND ')
+      const sql = `UPDATE ${this.dialect.quoteTable(req.database, req.table)} SET ${setClause} WHERE ${whereClause} LIMIT 1`
+      const params = [
+        ...setCols.map((c) => req.changes[c]),
+        ...pkCols.map((c) => req.pkValues[c])
+      ]
+      const [res] = await pool.execute<ResultSetHeader>(sql, params)
+      return { affectedRows: res.affectedRows }
+    })
   }
 
   async deleteRows(req: DeleteRowsRequest): Promise<{ affectedRows: number }> {
     if (req.pkRows.length === 0) return { affectedRows: 0 }
     assertNonEmptySQL('table', req.table)
 
-    const pool = await this.getPool(req.database)
-    const conn = await pool.getConnection()
-    const tableName = this.dialect.quoteTable(req.database, req.table)
-    try {
-      await conn.beginTransaction()
-      let affected = 0
-      for (const row of req.pkRows) {
-        const cols = Object.keys(row)
-        if (cols.length === 0) throw new Error('Refusing to DELETE without primary key')
-        assertColumns(cols, 'primary key')
-        const where = cols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(' AND ')
-        const [res] = await conn.execute<ResultSetHeader>(
-          `DELETE FROM ${tableName} WHERE ${where} LIMIT 1`,
-          cols.map((c) => row[c])
-        )
-        affected += res.affectedRows
+    return this.withPool(req.database, async (pool) => {
+      const conn = await pool.getConnection()
+      const tableName = this.dialect.quoteTable(req.database, req.table)
+      try {
+        await conn.beginTransaction()
+        let affected = 0
+        for (const row of req.pkRows) {
+          const cols = Object.keys(row)
+          if (cols.length === 0) throw new Error('Refusing to DELETE without primary key')
+          assertColumns(cols, 'primary key')
+          const where = cols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(' AND ')
+          const [res] = await conn.execute<ResultSetHeader>(
+            `DELETE FROM ${tableName} WHERE ${where} LIMIT 1`,
+            cols.map((c) => row[c])
+          )
+          affected += res.affectedRows
+        }
+        await conn.commit()
+        return { affectedRows: affected }
+      } catch (err) {
+        await conn.rollback()
+        throw err
+      } finally {
+        conn.release()
       }
-      await conn.commit()
-      return { affectedRows: affected }
-    } catch (err) {
-      await conn.rollback()
-      throw err
-    } finally {
-      conn.release()
-    }
+    })
   }
 
   async renameTable(req: RenameTableRequest): Promise<{ table: string }> {
@@ -273,11 +372,12 @@ export class MySQLDriver implements DbDriver {
     await this.assertSourceExists(req.database, req.table)
     await this.assertTargetAbsent(req.database, nextName)
 
-    const pool = await this.getPool(req.database)
-    await pool.query(
-      `RENAME TABLE ${this.dialect.quoteTable(req.database, req.table)} TO ${this.dialect.quoteTable(req.database, nextName)}`
-    )
-    return { table: nextName }
+    return this.withPool(req.database, async (pool) => {
+      await pool.query(
+        `RENAME TABLE ${this.dialect.quoteTable(req.database, req.table)} TO ${this.dialect.quoteTable(req.database, nextName)}`
+      )
+      return { table: nextName }
+    })
   }
 
   async copyTable(req: CopyTableRequest): Promise<{ table: string }> {
@@ -287,27 +387,29 @@ export class MySQLDriver implements DbDriver {
     await this.assertSourceExists(req.database, req.table)
     await this.assertTargetAbsent(req.database, targetTable)
 
-    const pool = await this.getPool(req.database)
-    const sourceName = this.dialect.quoteTable(req.database, req.table)
-    const nextName = this.dialect.quoteTable(req.database, targetTable)
-    let created = false
-    try {
-      await pool.query(`CREATE TABLE ${nextName} LIKE ${sourceName}`)
-      created = true
-      await pool.query(`INSERT INTO ${nextName} SELECT * FROM ${sourceName}`)
-      return { table: targetTable }
-    } catch (err) {
-      if (created) {
-        await pool.query(`DROP TABLE ${nextName}`).catch(() => undefined)
+    return this.withPool(req.database, async (pool) => {
+      const sourceName = this.dialect.quoteTable(req.database, req.table)
+      const nextName = this.dialect.quoteTable(req.database, targetTable)
+      let created = false
+      try {
+        await pool.query(`CREATE TABLE ${nextName} LIKE ${sourceName}`)
+        created = true
+        await pool.query(`INSERT INTO ${nextName} SELECT * FROM ${sourceName}`)
+        return { table: targetTable }
+      } catch (err) {
+        if (created) {
+          await pool.query(`DROP TABLE ${nextName}`).catch(() => undefined)
+        }
+        throw err
       }
-      throw err
-    }
+    })
   }
 
   async dropTable(req: DropTableRequest): Promise<void> {
     await this.assertSourceExists(req.database, req.table)
-    const pool = await this.getPool(req.database)
-    await pool.query(`DROP TABLE ${this.dialect.quoteTable(req.database, req.table)}`)
+    await this.withPool(req.database, async (pool) => {
+      await pool.query(`DROP TABLE ${this.dialect.quoteTable(req.database, req.table)}`)
+    })
   }
 
   async executeSQL(sql: string, database?: string): Promise<unknown> {
@@ -325,50 +427,55 @@ export class MySQLDriver implements DbDriver {
   async *streamRows(opts: StreamRowsOptions): AsyncGenerator<Record<string, unknown>[]> {
     if (opts.columns.length === 0) return
 
-    const pool = await this.getPool(opts.database)
-    const tableName = this.dialect.quoteTable(opts.database, opts.table)
-    const columnList = opts.columns.map((c) => this.dialect.quoteIdent(c)).join(', ')
-    const whereClause = opts.where && opts.where.trim() ? `WHERE ${opts.where.trim()}` : ''
-    const orderClause = buildMySQLOrderClause(
-      opts.columns.map((name) => ({ name }) as ColumnInfo),
-      opts.primaryKey,
-      opts.orderBy
-    )
-
-    let offset = 0
-    let remaining = opts.limit
-    while (remaining === undefined || remaining > 0) {
-      const batchLimit =
-        remaining === undefined ? opts.batchSize : Math.min(opts.batchSize, remaining)
-      const [rows] = await pool.query<RowDataPacket[]>(
-        `SELECT ${columnList} FROM ${tableName} ${whereClause} ${orderClause} LIMIT ${batchLimit} OFFSET ${offset}`
+    const lease = await this.acquirePool(opts.database)
+    try {
+      const tableName = this.dialect.quoteTable(opts.database, opts.table)
+      const columnList = opts.columns.map((c) => this.dialect.quoteIdent(c)).join(', ')
+      const whereClause = opts.where && opts.where.trim() ? `WHERE ${opts.where.trim()}` : ''
+      const orderClause = buildMySQLOrderClause(
+        opts.columns.map((name) => ({ name }) as ColumnInfo),
+        opts.primaryKey,
+        opts.orderBy
       )
-      if (rows.length === 0) return
-      yield rows as Record<string, unknown>[]
-      offset += rows.length
-      if (remaining !== undefined) remaining -= rows.length
-      if (rows.length < batchLimit) return
+
+      let offset = 0
+      let remaining = opts.limit
+      while (remaining === undefined || remaining > 0) {
+        const batchLimit =
+          remaining === undefined ? opts.batchSize : Math.min(opts.batchSize, remaining)
+        const [rows] = await lease.pool.query<RowDataPacket[]>(
+          `SELECT ${columnList} FROM ${tableName} ${whereClause} ${orderClause} LIMIT ${batchLimit} OFFSET ${offset}`
+        )
+        if (rows.length === 0) return
+        yield rows as Record<string, unknown>[]
+        offset += rows.length
+        if (remaining !== undefined) remaining -= rows.length
+        if (rows.length < batchLimit) return
+      }
+    } finally {
+      lease.release()
     }
   }
 
   async close(): Promise<void> {
-    if (!this.pool) return
-    const pool = this.pool
-    this.pool = null
-    this.currentDatabase = undefined
-    await pool.end().catch(() => undefined)
+    if (this.pools.size === 0) return
+
+    const pools = Array.from(this.pools.values(), (entry) => entry.pool)
+    this.pools.clear()
+    await Promise.all(pools.map((pool) => pool.end().catch(() => undefined)))
   }
 
   private async tableExists(database: string, table: string): Promise<boolean> {
-    const pool = await this.getPool(database)
-    const [rows] = await pool.query<RowDataPacket[]>(
-      `SELECT 1 AS present
-       FROM information_schema.TABLES
-       WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
-       LIMIT 1`,
-      [database, table]
-    )
-    return rows.length > 0
+    return this.withPool(database, async (pool) => {
+      const [rows] = await pool.query<RowDataPacket[]>(
+        `SELECT 1 AS present
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_NAME = ?
+         LIMIT 1`,
+        [database, table]
+      )
+      return rows.length > 0
+    })
   }
 
   private async assertSourceExists(database: string, table: string): Promise<void> {

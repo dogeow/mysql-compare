@@ -15,6 +15,7 @@ import type {
   SyncProgressEvent,
   SyncRequest
 } from '../../../shared/types'
+import { submitSyncRequest } from './sync-request'
 
 interface Props {
   open: boolean
@@ -43,21 +44,25 @@ export function SyncPanel({ open, onClose, source, target, diff }: Props) {
     return off
   }, [])
 
-  const buildReq = (dryRun: boolean): SyncRequest => ({
-    sourceConnectionId: source.connectionId,
-    sourceDatabase: source.database,
-    targetConnectionId: target.connectionId,
-    targetDatabase: target.database,
-    tables: Array.from(selected),
-    syncStructure,
-    syncData,
-    existingTableStrategy: strategy,
-    dryRun
-  })
+  function buildReq(dryRun: true): SyncRequest & { dryRun: true }
+  function buildReq(dryRun: false): SyncRequest & { dryRun: false }
+  function buildReq(dryRun: boolean): SyncRequest {
+    return {
+      sourceConnectionId: source.connectionId,
+      sourceDatabase: source.database,
+      targetConnectionId: target.connectionId,
+      targetDatabase: target.database,
+      tables: Array.from(selected),
+      syncStructure,
+      syncData,
+      existingTableStrategy: strategy,
+      dryRun
+    }
+  }
 
   const onPreview = async () => {
     try {
-      const p = await unwrap<SyncPlan>(api.sync.buildPlan(buildReq(true)))
+      const p = await unwrap<SyncPlan>(submitSyncRequest(api.sync, buildReq(true)))
       setPlan(p)
     } catch (err) {
       showToast((err as Error).message, 'error')
@@ -73,7 +78,7 @@ export function SyncPanel({ open, onClose, source, target, diff }: Props) {
     setRunning(true)
     setLogs([])
     try {
-      const r = await unwrap<{ executed: number; errors: number }>(api.sync.execute(buildReq(false)))
+      const r = await unwrap<{ executed: number; errors: number }>(submitSyncRequest(api.sync, buildReq(false)))
       showToast(`Executed ${r.executed} statement(s), ${r.errors} error(s)`, r.errors === 0 ? 'success' : 'error')
     } catch (err) {
       showToast((err as Error).message, 'error')
