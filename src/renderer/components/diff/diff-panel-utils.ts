@@ -3,14 +3,25 @@ import type { DatabaseDiff, TableDiff, TableRowComparison } from '../../../share
 export const TABLE_COMPARE_CONCURRENCY_OPTIONS = [1, 2, 3, 5, 8] as const
 export const DEFAULT_TABLE_COMPARE_CONCURRENCY = 3
 export const DEFAULT_TABLE_STATUS_FILTER = 'all'
+export const DEFAULT_DIFF_RESULT_TAB = 'status'
+export const DEFAULT_COMPARE_SETUP_EXPANDED = true
+export const DEFAULT_SOURCE_TABLES_EXPANDED = false
+export const DEFAULT_TARGET_TABLES_EXPANDED = false
+export const DEFAULT_TABLE_SEARCH_QUERY = ''
 export const DIFF_PANEL_PREFERENCES_KEY = 'mysql-compare:diff-panel-preferences'
 
 export type TableCompareStatus = 'queued' | 'comparing' | 'done' | 'error'
 export type TableStatusFilter = 'all' | 'comparing' | 'changed' | 'schema-changed' | 'row-changed'
+export type DiffResultTab = 'status' | 'schema' | 'data'
 
 export interface DiffPanelPreferences {
   statusFilter: TableStatusFilter
   tableCompareConcurrency: number
+  resultTab: DiffResultTab
+  setupExpanded: boolean
+  sourceTablesExpanded: boolean
+  targetTablesExpanded: boolean
+  tableSearchQuery: string
 }
 
 export interface TableCompareEntry {
@@ -123,13 +134,49 @@ export function hasNoRowDifferences({ dataDiff }: TableRowComparison): boolean {
 
 export function filterComparisonEntries(
   entries: TableCompareEntry[],
-  filter: TableStatusFilter
+  filter: TableStatusFilter,
+  searchQuery = ''
 ): TableCompareEntry[] {
-  if (filter === 'all') return entries
-  if (filter === 'comparing') return entries.filter((entry) => entry.status === 'comparing')
-  if (filter === 'schema-changed') return entries.filter(hasSchemaChangedEntry)
-  if (filter === 'row-changed') return entries.filter(hasRowChangedEntry)
-  return entries.filter(hasChangedEntry)
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  const filteredByStatus =
+    filter === 'all'
+      ? entries
+      : filter === 'comparing'
+        ? entries.filter((entry) => entry.status === 'comparing')
+        : filter === 'schema-changed'
+          ? entries.filter(hasSchemaChangedEntry)
+          : filter === 'row-changed'
+            ? entries.filter(hasRowChangedEntry)
+            : entries.filter(hasChangedEntry)
+
+  if (!normalizedQuery) return filteredByStatus
+
+  return filteredByStatus.filter((entry) => entry.table.toLowerCase().includes(normalizedQuery))
+}
+
+export function prioritizeComparisonEntries(entries: TableCompareEntry[]): TableCompareEntry[] {
+  return entries
+    .map((entry, index) => ({ entry, index }))
+    .sort((left, right) => {
+      const leftPriority = left.entry.status === 'error' ? 0 : 1
+      const rightPriority = right.entry.status === 'error' ? 0 : 1
+      if (leftPriority !== rightPriority) {
+        return leftPriority - rightPriority
+      }
+      return left.index - right.index
+    })
+    .map(({ entry }) => entry)
+}
+
+export function getPreferredComparisonTable(
+  entries: TableCompareEntry[],
+  currentTable: string | null
+): string | null {
+  if (currentTable && entries.some((entry) => entry.table === currentTable)) {
+    return currentTable
+  }
+
+  return entries.find((entry) => entry.status === 'error')?.table ?? entries[0]?.table ?? null
 }
 
 export function parseTableCompareConcurrency(value: string): number {
@@ -145,7 +192,12 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
   if (!raw) {
     return {
       statusFilter: DEFAULT_TABLE_STATUS_FILTER,
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: DEFAULT_DIFF_RESULT_TAB,
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     }
   }
 
@@ -153,16 +205,37 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
     const parsed = JSON.parse(raw) as {
       statusFilter?: unknown
       tableCompareConcurrency?: unknown
+      resultTab?: unknown
+      setupExpanded?: unknown
+      sourceTablesExpanded?: unknown
+      targetTablesExpanded?: unknown
+      tableSearchQuery?: unknown
     }
 
     return {
       statusFilter: parseTableStatusFilter(parsed.statusFilter),
-      tableCompareConcurrency: parseTableCompareConcurrency(String(parsed.tableCompareConcurrency ?? ''))
+      tableCompareConcurrency: parseTableCompareConcurrency(String(parsed.tableCompareConcurrency ?? '')),
+      resultTab: parseDiffResultTab(parsed.resultTab),
+      setupExpanded: parseBooleanPreference(parsed.setupExpanded, DEFAULT_COMPARE_SETUP_EXPANDED),
+      sourceTablesExpanded: parseBooleanPreference(
+        parsed.sourceTablesExpanded,
+        DEFAULT_SOURCE_TABLES_EXPANDED
+      ),
+      targetTablesExpanded: parseBooleanPreference(
+        parsed.targetTablesExpanded,
+        DEFAULT_TARGET_TABLES_EXPANDED
+      ),
+      tableSearchQuery: parseStringPreference(parsed.tableSearchQuery, DEFAULT_TABLE_SEARCH_QUERY)
     }
   } catch {
     return {
       statusFilter: DEFAULT_TABLE_STATUS_FILTER,
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: DEFAULT_DIFF_RESULT_TAB,
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     }
   }
 }
@@ -197,4 +270,18 @@ function parseTableStatusFilter(value: unknown): TableStatusFilter {
     value === 'row-changed'
     ? value
     : DEFAULT_TABLE_STATUS_FILTER
+}
+
+function parseDiffResultTab(value: unknown): DiffResultTab {
+  return value === 'status' || value === 'schema' || value === 'data'
+    ? value
+    : DEFAULT_DIFF_RESULT_TAB
+}
+
+function parseBooleanPreference(value: unknown, fallback: boolean): boolean {
+  return typeof value === 'boolean' ? value : fallback
+}
+
+function parseStringPreference(value: unknown, fallback: string): string {
+  return typeof value === 'string' ? value : fallback
 }

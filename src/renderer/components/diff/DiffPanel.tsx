@@ -1,17 +1,18 @@
 // 数据库对比面板：先加载两边表列表，再逐表对比并渐进展示结果。
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { AlertCircle, CheckCircle2, CircleDashed, LoaderCircle } from 'lucide-react'
+import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, LoaderCircle } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import { Select } from '@renderer/components/ui/select'
 import { Label } from '@renderer/components/ui/label'
 import { Badge } from '@renderer/components/ui/badge'
+import { Tabs } from '@renderer/components/ui/tabs'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import type {
   DatabaseDiff,
   TableDataDiff,
-  TableDataDiffSample,
   TableComparisonResult,
   TableDiff,
   TableRowComparison
@@ -19,20 +20,23 @@ import type {
 import {
   buildDatabaseDiff,
   buildInitialComparisonEntries,
-  DEFAULT_TABLE_COMPARE_CONCURRENCY,
   DIFF_PANEL_PREFERENCES_KEY,
   filterComparisonEntries,
+  getPreferredComparisonTable,
   hasSchemaOrPresenceDiff,
   hasNoRowDifferences,
   parseDiffPanelPreferences,
   parseTableCompareConcurrency,
+  prioritizeComparisonEntries,
   runWithConcurrencyLimit,
   TABLE_COMPARE_CONCURRENCY_OPTIONS,
   type DiffPanelPreferences,
+  type DiffResultTab,
   type TableCompareEntry,
   type TableStatusFilter,
   updateTableEntry
 } from './diff-panel-utils'
+import { ComparisonStatusPanel } from './ComparisonStatusPanel'
 import { SyncPanel } from './SyncPanel'
 import {
   requestTableComparison,
@@ -64,6 +68,7 @@ export function DiffPanel() {
   const [sourceTables, setSourceTables] = useState<string[]>([])
   const [targetTables, setTargetTables] = useState<string[]>([])
   const [comparisonEntries, setComparisonEntries] = useState<TableCompareEntry[]>([])
+  const [selectedComparisonTable, setSelectedComparisonTable] = useState<string | null>(null)
   const [showSync, setShowSync] = useState(false)
   const [compareData, setCompareData] = useState(true)
   const [preferences, setPreferences] = useState<DiffPanelPreferences>(() =>
@@ -73,6 +78,12 @@ export function DiffPanel() {
 
   const statusFilter = preferences.statusFilter
   const tableCompareConcurrency = preferences.tableCompareConcurrency
+  const resultTab = preferences.resultTab
+  const setupExpanded = preferences.setupExpanded
+  const sourceTablesExpanded = preferences.sourceTablesExpanded
+  const tableSearchQuery = preferences.tableSearchQuery
+  const targetTablesExpanded = preferences.targetTablesExpanded
+  const tableListsExpanded = sourceTablesExpanded || targetTablesExpanded
 
   useEffect(() => {
     refresh()
@@ -92,6 +103,16 @@ export function DiffPanel() {
   }, [srcId])
   useEffect(() => {
     loadDbs(tgtId, setTgtDbs)
+  }, [tgtId])
+
+  useEffect(() => {
+    setSrcDb('')
+    setSrcDbs([])
+  }, [srcId])
+
+  useEffect(() => {
+    setTgtDb('')
+    setTgtDbs([])
   }, [tgtId])
 
   useEffect(() => {
@@ -120,6 +141,12 @@ export function DiffPanel() {
     }
 
     setShowSync(false)
+    setSelectedComparisonTable(null)
+    setPreferences((current) => ({
+      ...current,
+      resultTab: 'status',
+      setupExpanded: false
+    }))
     setCompareContext(nextContext)
     setComparePhase('loading-tables')
     setSourceTables([])
@@ -233,6 +260,8 @@ export function DiffPanel() {
     { value: '', label: '— select —' },
     ...connections.map((c) => ({ value: c.id, label: c.name }))
   ]
+  const selectedSourceConnection = connections.find((connection) => connection.id === srcId)
+  const selectedTargetConnection = connections.find((connection) => connection.id === tgtId)
   const sourceConnection = connections.find(
     (connection) => connection.id === (compareContext?.sourceConnectionId ?? srcId)
   )
@@ -243,11 +272,20 @@ export function DiffPanel() {
   const visibleSchemaDiffs = diff?.tableDiffs.filter(hasSchemaOrPresenceDiff) ?? []
   const rowCompareSummary = diff ? summarizeRowComparisons(diff.rowComparisons) : null
   const filteredComparisonEntries = useMemo(
-    () => filterComparisonEntries(comparisonEntries, statusFilter),
-    [comparisonEntries, statusFilter]
+    () => filterComparisonEntries(comparisonEntries, statusFilter, tableSearchQuery),
+    [comparisonEntries, statusFilter, tableSearchQuery]
   )
+  const prioritizedComparisonEntries = useMemo(
+    () => prioritizeComparisonEntries(filteredComparisonEntries),
+    [filteredComparisonEntries]
+  )
+  const hasCompareErrors = comparisonEntries.some((entry) => entry.status === 'error')
+  const compareErrorCount = comparisonEntries.filter((entry) => entry.status === 'error').length
   const fullyIdentical = diff
-    ? comparePhase === 'done' && diff.tableDiffs.length === 0 && (!compareContext?.compareData || diff.rowComparisons.every(hasNoRowDifferences))
+    ? comparePhase === 'done' &&
+      !hasCompareErrors &&
+      diff.tableDiffs.length === 0 &&
+      (!compareContext?.compareData || diff.rowComparisons.every(hasNoRowDifferences))
     : false
   const hasSkippedRowComparison = diff?.rowComparisons.some(
     ({ dataDiff }) => !dataDiff.comparable
@@ -258,6 +296,69 @@ export function DiffPanel() {
   const completedSharedTableCount = comparisonEntries.filter(
     (entry) => entry.sourceExists && entry.targetExists && (entry.status === 'done' || entry.status === 'error')
   ).length
+  const hasRowComparisonResults = compareData && !!diff && diff.rowComparisons.length > 0
+  const rowChangedTableCount = diff
+    ? diff.rowComparisons.filter(
+        (rowComparison) =>
+          rowComparison.dataDiff.comparable && !hasNoRowDifferences(rowComparison)
+      ).length
+    : 0
+  const rowSkippedTableCount = diff
+    ? diff.rowComparisons.filter((rowComparison) => !rowComparison.dataDiff.comparable).length
+    : 0
+  const compareSetupSummary = formatCompareSetupSummary({
+    sourceConnectionName: selectedSourceConnection?.name,
+    sourceDatabase: srcDb,
+    targetConnectionName: selectedTargetConnection?.name,
+    targetDatabase: tgtDb,
+    compareData
+  })
+
+  useEffect(() => {
+    const preferredTable = getPreferredComparisonTable(
+      prioritizedComparisonEntries,
+      selectedComparisonTable
+    )
+    if (preferredTable !== selectedComparisonTable) {
+      setSelectedComparisonTable(preferredTable)
+    }
+  }, [prioritizedComparisonEntries, selectedComparisonTable])
+
+  useEffect(() => {
+    if (!compareData && resultTab === 'data') {
+      setPreferences((current) => ({
+        ...current,
+        resultTab: 'status'
+      }))
+    }
+  }, [compareData, resultTab])
+
+  useEffect(() => {
+    if (
+      resultTab === 'schema' &&
+      comparePhase === 'done' &&
+      compareData &&
+      visibleSchemaDiffs.length === 0 &&
+      hasRowComparisonResults
+    ) {
+      setPreferences((current) => ({
+        ...current,
+        resultTab: 'data'
+      }))
+    }
+  }, [compareData, comparePhase, hasRowComparisonResults, resultTab, visibleSchemaDiffs.length])
+
+  const toggleTableLists = () => {
+    setPreferences((current) => {
+      const nextExpanded = !(current.sourceTablesExpanded || current.targetTablesExpanded)
+
+      return {
+        ...current,
+        sourceTablesExpanded: nextExpanded,
+        targetTablesExpanded: nextExpanded
+      }
+    })
+  }
 
   const openComparedTable = (side: 'source' | 'target', table: string) => {
     if (!compareContext) return
@@ -284,44 +385,82 @@ export function DiffPanel() {
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="grid grid-cols-2 gap-4 p-4 border-b border-border">
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Source</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2 min-w-0">
-              <Label>Connection</Label>
-              <Select options={connOptions} value={srcId} onChange={(e) => setSrcId(e.target.value)} />
+      <div className="border-b border-border">
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+          <button
+            type="button"
+            className="flex min-w-0 items-center gap-2 text-left"
+            onClick={() =>
+              setPreferences((current) => ({
+                ...current,
+                setupExpanded: !current.setupExpanded
+              }))
+            }
+          >
+            {setupExpanded ? (
+              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+            ) : (
+              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+            )}
+            <span className="text-sm font-medium">Compare setup</span>
+          </button>
+          <div className="min-w-0 flex-1 text-xs text-muted-foreground">{compareSetupSummary}</div>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="h-7 px-2 text-[11px]"
+            onClick={() =>
+              setPreferences((current) => ({
+                ...current,
+                setupExpanded: !current.setupExpanded
+              }))
+            }
+          >
+            {setupExpanded ? 'Hide' : 'Show'}
+          </Button>
+        </div>
+
+        {setupExpanded && (
+          <div className="grid grid-cols-1 gap-4 border-t border-border/60 px-4 py-4 xl:grid-cols-2">
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Source</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-2 min-w-0">
+                  <Label>Connection</Label>
+                  <Select options={connOptions} value={srcId} onChange={(e) => setSrcId(e.target.value)} />
+                </div>
+                <div className="space-y-2 min-w-0">
+                  <Label>Database</Label>
+                  <Select
+                    options={[{ value: '', label: '— select —' }, ...srcDbs.map((d) => ({ value: d, label: d }))]}
+                    value={srcDb}
+                    onChange={(e) => setSrcDb(e.target.value)}
+                  />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2 min-w-0">
-              <Label>Database</Label>
-              <Select
-                options={[{ value: '', label: '— select —' }, ...srcDbs.map((d) => ({ value: d, label: d }))]}
-                value={srcDb}
-                onChange={(e) => setSrcDb(e.target.value)}
-              />
+            <div className="space-y-2">
+              <h3 className="text-sm font-semibold">Target</h3>
+              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                <div className="space-y-2 min-w-0">
+                  <Label>Connection</Label>
+                  <Select options={connOptions} value={tgtId} onChange={(e) => setTgtId(e.target.value)} />
+                </div>
+                <div className="space-y-2 min-w-0">
+                  <Label>Database</Label>
+                  <Select
+                    options={[{ value: '', label: '— select —' }, ...tgtDbs.map((d) => ({ value: d, label: d }))]}
+                    value={tgtDb}
+                    onChange={(e) => setTgtDb(e.target.value)}
+                  />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-        <div className="space-y-2">
-          <h3 className="text-sm font-semibold">Target</h3>
-          <div className="grid grid-cols-2 gap-3">
-            <div className="space-y-2 min-w-0">
-              <Label>Connection</Label>
-              <Select options={connOptions} value={tgtId} onChange={(e) => setTgtId(e.target.value)} />
-            </div>
-            <div className="space-y-2 min-w-0">
-              <Label>Database</Label>
-              <Select
-                options={[{ value: '', label: '— select —' }, ...tgtDbs.map((d) => ({ value: d, label: d }))]}
-                value={tgtDb}
-                onChange={(e) => setTgtDb(e.target.value)}
-              />
-            </div>
-          </div>
-        </div>
+        )}
       </div>
 
-      <div className="flex items-center gap-2 px-4 py-2 border-b border-border">
+      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
         <Button onClick={onCompare} disabled={loading}>
           {loading ? 'Comparing...' : 'Compare'}
         </Button>
@@ -358,118 +497,267 @@ export function DiffPanel() {
         >
           Plan Sync →
         </Button>
-        <span className="text-xs text-muted-foreground ml-auto">
-          {diff && `${diff.tableDiffs.length} table(s) differ${rowCompareSummary ? ` · ${rowCompareSummary}` : ''}`}
-        </span>
+        {diff && (
+          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+              {diff.tableDiffs.length} table(s) differ
+            </Badge>
+            {rowCompareSummary && (
+              <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                {rowCompareSummary}
+              </Badge>
+            )}
+          </div>
+        )}
       </div>
 
       {compareContext && (
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 px-4 py-3 border-b border-border">
-          <TableListPanel title="Source tables" tables={sourceTables} phase={comparePhase} />
-          <TableListPanel title="Target tables" tables={targetTables} phase={comparePhase} />
+          <TableListPanel
+            title="Source tables"
+            tables={sourceTables}
+            phase={comparePhase}
+            expanded={tableListsExpanded}
+            onToggle={toggleTableLists}
+            toggleLabel={tableListsExpanded ? 'Hide both' : 'Show both'}
+          />
+          <TableListPanel
+            title="Target tables"
+            tables={targetTables}
+            phase={comparePhase}
+            expanded={tableListsExpanded}
+            onToggle={toggleTableLists}
+            toggleLabel={tableListsExpanded ? 'Hide both' : 'Show both'}
+          />
         </div>
       )}
 
       <div className="min-h-0 flex-1 overflow-auto">
         <div className="space-y-3 p-4">
-          {compareContext && (
-            <div className="space-y-3 rounded border border-border bg-card/20 p-3">
-              <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <ComparePhaseIcon phase={comparePhase} />
-                  <span>{formatComparePhase(comparePhase, completedSharedTableCount, sharedTableCount)}</span>
-                </div>
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <span>Status</span>
-                  <Select
-                    className="w-36"
-                    value={statusFilter}
-                    onChange={(event) =>
-                      setPreferences((current) => ({
-                        ...current,
-                        statusFilter: event.target.value as TableStatusFilter
-                      }))
-                    }
-                    options={[
-                      { value: 'all', label: 'All' },
-                      { value: 'comparing', label: 'Comparing' },
-                      { value: 'changed', label: 'Only changed' },
-                      { value: 'schema-changed', label: 'Schema changed' },
-                      { value: 'row-changed', label: 'Row changed' }
-                    ]}
-                  />
-                  <Badge>{filteredComparisonEntries.length}</Badge>
-                </div>
-              </div>
-              {comparisonEntries.length > 0 && (
-                <ComparisonStatusGrid
-                  entries={filteredComparisonEntries}
-                  onOpenCompare={openCompareView}
-                  onOpenSource={(table) => openComparedTable('source', table)}
-                  onOpenTarget={(table) => openComparedTable('target', table)}
-                />
-              )}
-            </div>
-          )}
-
           {comparePhase === 'idle' && (
             <div className="text-xs text-muted-foreground">
               Choose source &amp; target then click Compare. Row comparison uses shared primary keys when possible and falls back to all shared columns when needed.
             </div>
           )}
-          {visibleSchemaDiffs.map((td) => (
-            <div key={td.table} className="border border-border rounded">
-              <div className="flex flex-wrap items-center gap-2 px-3 py-2 bg-card border-b border-border">
-                <strong className="text-sm">{td.table}</strong>
-                <KindBadge kind={td.kind} />
-                <span className="text-[10px] text-muted-foreground mr-auto">
-                  {td.columnDiffs.length} column diff(s) · {td.indexDiffs.length} index diff(s)
-                  {td.dataDiff && ` · ${formatDataSummary(td.dataDiff)}`}
-                </span>
-                {compareContext && (
-                  <TableOpenActions
-                    compareAvailable={td.kind === 'modified'}
-                    sourceAvailable={td.kind !== 'only-in-target'}
-                    targetAvailable={td.kind !== 'only-in-source'}
-                    onOpenCompare={() => openCompareView(td.table)}
-                    onOpenSource={() => openComparedTable('source', td.table)}
-                    onOpenTarget={() => openComparedTable('target', td.table)}
+          {compareContext && (
+            <div className="overflow-hidden rounded-xl border border-border/60 bg-card/10">
+              <Tabs
+                className="px-4 pt-3"
+                value={resultTab}
+                onValueChange={(value) =>
+                  setPreferences((current) => ({
+                    ...current,
+                    resultTab: value as DiffResultTab
+                  }))
+                }
+                items={[
+                  {
+                    value: 'status',
+                    label: (
+                      <span className="flex items-center gap-2">
+                        <span>Status</span>
+                        <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                          {comparisonEntries.length}
+                        </Badge>
+                        {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
+                      </span>
+                    )
+                  },
+                  {
+                    value: 'schema',
+                    label: (
+                      <span className="flex items-center gap-2">
+                        <span>Structure diff</span>
+                        <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                          {visibleSchemaDiffs.length} changed
+                        </Badge>
+                        {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
+                      </span>
+                    )
+                  },
+                  ...(compareData
+                    ? [
+                        {
+                          value: 'data',
+                          label: (
+                            <span className="flex items-center gap-2">
+                              <span>Content diff</span>
+                              <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                                {rowChangedTableCount} changed
+                              </Badge>
+                              {rowSkippedTableCount > 0 && <Badge variant="warning">{rowSkippedTableCount} skipped</Badge>}
+                              {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
+                            </span>
+                          )
+                        }
+                      ]
+                    : [])
+                ]}
+              />
+
+              <div className="p-4 pt-3">
+                {resultTab === 'status' ? (
+                  <div className="space-y-3">
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
+                      <div className="space-y-3">
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <ComparePhaseIcon phase={comparePhase} />
+                          <span>{formatComparePhase(comparePhase, completedSharedTableCount, sharedTableCount)}</span>
+                        </div>
+                        <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                            {comparisonEntries.length} tracked
+                          </Badge>
+                          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                            {sharedTableCount} shared
+                          </Badge>
+                          {hasCompareErrors && <Badge variant="destructive">errors present</Badge>}
+                        </div>
+                      </div>
+                      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground lg:justify-end">
+                        <Input
+                          value={tableSearchQuery}
+                          onChange={(event) =>
+                            setPreferences((current) => ({
+                              ...current,
+                              tableSearchQuery: event.target.value
+                            }))
+                          }
+                          placeholder="Search table"
+                          className="h-8 w-40 text-xs"
+                        />
+                        {tableSearchQuery && (
+                          <Button
+                            size="sm"
+                            variant="ghost"
+                            className="h-8 px-2"
+                            onClick={() =>
+                              setPreferences((current) => ({
+                                ...current,
+                                tableSearchQuery: ''
+                              }))
+                            }
+                          >
+                            Clear
+                          </Button>
+                        )}
+                        <span>Status</span>
+                        <Select
+                          className="w-36"
+                          value={statusFilter}
+                          onChange={(event) =>
+                            setPreferences((current) => ({
+                              ...current,
+                              statusFilter: event.target.value as TableStatusFilter
+                            }))
+                          }
+                          options={[
+                            { value: 'all', label: 'All' },
+                            { value: 'comparing', label: 'Comparing' },
+                            { value: 'changed', label: 'Only changed' },
+                            { value: 'schema-changed', label: 'Structure changed' },
+                            { value: 'row-changed', label: 'Content changed' }
+                          ]}
+                        />
+                        <Badge>{filteredComparisonEntries.length}</Badge>
+                      </div>
+                    </div>
+                    {comparisonEntries.length > 0 ? (
+                      <ComparisonStatusPanel
+                        entries={prioritizedComparisonEntries}
+                        selectedTable={selectedComparisonTable}
+                        onSelectTable={setSelectedComparisonTable}
+                        onOpenCompare={openCompareView}
+                        onOpenSource={(table) => openComparedTable('source', table)}
+                        onOpenTarget={(table) => openComparedTable('target', table)}
+                      />
+                    ) : (
+                      <div className="text-xs text-muted-foreground">
+                        {comparePhase === 'loading-tables'
+                          ? 'Loading source and target table lists...'
+                          : 'No tables match the current filter.'}
+                      </div>
+                    )}
+                  </div>
+                ) : resultTab === 'schema' ? (
+                  visibleSchemaDiffs.length > 0 ? (
+                    <div className="space-y-3">
+                      {visibleSchemaDiffs.map((td) => (
+                        <div key={td.table} className="rounded-xl bg-card/20">
+                          <div className="flex flex-wrap items-center gap-2 border-b border-border/50 bg-card/40 px-3 py-2">
+                            <strong className="text-sm">{td.table}</strong>
+                            <KindBadge kind={td.kind} />
+                            <span className="mr-auto text-[10px] text-muted-foreground">
+                              {td.columnDiffs.length} column diff(s) · {td.indexDiffs.length} index diff(s)
+                              {td.dataDiff && ` · ${formatDataSummary(td.dataDiff)}`}
+                            </span>
+                            {compareContext && (
+                              <TableOpenActions
+                                compareAvailable={td.kind === 'modified'}
+                                sourceAvailable={td.kind !== 'only-in-target'}
+                                targetAvailable={td.kind !== 'only-in-source'}
+                                onOpenCompare={() => openCompareView(td.table)}
+                                onOpenSource={() => openComparedTable('source', td.table)}
+                                onOpenTarget={() => openComparedTable('target', td.table)}
+                              />
+                            )}
+                          </div>
+                          {td.columnDiffs.length > 0 && (
+                            <div className="grid grid-cols-1 gap-3 p-3 text-xs xl:grid-cols-2">
+                              <DiffColumn
+                                title="Source"
+                                items={td.columnDiffs.map((d) => formatCol(d.source, d.kind, 'source'))}
+                              />
+                              <DiffColumn
+                                title="Target"
+                                items={td.columnDiffs.map((d) => formatCol(d.target, d.kind, 'target'))}
+                              />
+                            </div>
+                          )}
+                          {td.indexDiffs.length > 0 && (
+                            <div className="grid grid-cols-1 gap-3 px-3 pb-3 text-xs xl:grid-cols-2">
+                              <DiffColumn
+                                title="Source indexes"
+                                items={td.indexDiffs.map((d) => formatIdx(d.source, d.kind, 'source'))}
+                              />
+                              <DiffColumn
+                                title="Target indexes"
+                                items={td.indexDiffs.map((d) => formatIdx(d.target, d.kind, 'target'))}
+                              />
+                            </div>
+                          )}
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <EmptyResultState
+                      title="No structure differences"
+                      description={
+                        hasRowComparisonResults
+                          ? 'Schema matches on both sides. Switch to the Content diff tab to inspect row-level changes.'
+                          : 'No schema or presence differences were found in the current result set.'
+                      }
+                    />
+                  )
+                ) : hasRowComparisonResults && diff ? (
+                  <RowComparisonSection
+                    rowComparisons={diff.rowComparisons}
+                    onOpenCompare={openCompareView}
+                    onOpenSource={(table) => openComparedTable('source', table)}
+                    onOpenTarget={(table) => openComparedTable('target', table)}
+                  />
+                ) : (
+                  <EmptyResultState
+                    title="No content comparison results"
+                    description={
+                      compareData
+                        ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
+                        : 'Enable Compare rows before running Compare to inspect row-level changes here.'
+                    }
                   />
                 )}
               </div>
-              {td.columnDiffs.length > 0 && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 p-3 text-xs">
-                  <DiffColumn
-                    title="Source"
-                    items={td.columnDiffs.map((d) => formatCol(d.source, d.kind, 'source'))}
-                  />
-                  <DiffColumn
-                    title="Target"
-                    items={td.columnDiffs.map((d) => formatCol(d.target, d.kind, 'target'))}
-                  />
-                </div>
-              )}
-              {td.indexDiffs.length > 0 && (
-                <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 px-3 pb-3 text-xs">
-                  <DiffColumn
-                    title="Source indexes"
-                    items={td.indexDiffs.map((d) => formatIdx(d.source, d.kind, 'source'))}
-                  />
-                  <DiffColumn
-                    title="Target indexes"
-                    items={td.indexDiffs.map((d) => formatIdx(d.target, d.kind, 'target'))}
-                  />
-                </div>
-              )}
             </div>
-          ))}
-          {compareData && diff && diff.rowComparisons.length > 0 && (
-            <RowComparisonSection
-              rowComparisons={diff.rowComparisons}
-              onOpenCompare={openCompareView}
-              onOpenSource={(table) => openComparedTable('source', table)}
-              onOpenTarget={(table) => openComparedTable('target', table)}
-            />
           )}
           {diff && fullyIdentical && (
             <div className="text-xs text-emerald-400">
@@ -478,7 +766,7 @@ export function DiffPanel() {
           )}
           {diff && compareData && diff.tableDiffs.length === 0 && hasSkippedRowComparison && !fullyIdentical && (
             <div className="text-xs text-amber-400">
-              Schema is identical, but some row comparisons were skipped. See the Row comparison section below for details.
+              Schema is identical, but some row comparisons were skipped. Open the Content diff tab for details.
             </div>
           )}
         </div>
@@ -535,24 +823,54 @@ function ComparePhaseIcon({ phase }: { phase: ComparePhase }) {
 function TableListPanel({
   title,
   tables,
-  phase
+  phase,
+  expanded,
+  onToggle,
+  toggleLabel
 }: {
   title: string
   tables: string[]
   phase: ComparePhase
+  expanded: boolean
+  onToggle: () => void
+  toggleLabel?: string
 }) {
   return (
     <div className="rounded border border-border/60 bg-card/40 p-3">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        <Badge>{tables.length}</Badge>
+      <div className="flex items-center justify-between gap-2">
+        <button
+          type="button"
+          className="flex min-w-0 items-center gap-2 text-left"
+          onClick={onToggle}
+        >
+          {expanded ? (
+            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+          ) : (
+            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+          )}
+          <span className="text-xs font-medium text-muted-foreground">{title}</span>
+        </button>
+        <div className="flex items-center gap-2">
+          <Badge>{tables.length}</Badge>
+          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onToggle}>
+            {toggleLabel ?? (expanded ? 'Hide' : 'Show')}
+          </Button>
+        </div>
       </div>
-      {tables.length === 0 ? (
-        <div className="text-xs text-muted-foreground">
+      {!expanded ? (
+        <div className="mt-2 text-xs text-muted-foreground">
+          {phase === 'loading-tables'
+            ? 'Loading tables...'
+            : tables.length === 0
+              ? 'No tables found'
+              : `${tables.length} table(s) hidden to keep the compare view compact.`}
+        </div>
+      ) : tables.length === 0 ? (
+        <div className="mt-2 text-xs text-muted-foreground">
           {phase === 'loading-tables' ? 'Loading tables...' : 'No tables found'}
         </div>
       ) : (
-        <div className="max-h-40 overflow-auto space-y-1">
+        <div className="mt-2 max-h-40 overflow-auto space-y-1">
           {tables.map((table) => (
             <div key={table} className="rounded border border-border/50 px-2 py-1 text-xs font-mono">
               {table}
@@ -564,83 +882,40 @@ function TableListPanel({
   )
 }
 
-function ComparisonStatusGrid({
-  entries,
-  onOpenCompare,
-  onOpenSource,
-  onOpenTarget
+function formatCompareSetupSummary({
+  sourceConnectionName,
+  sourceDatabase,
+  targetConnectionName,
+  targetDatabase,
+  compareData
 }: {
-  entries: TableCompareEntry[]
-  onOpenCompare: (table: string) => void
-  onOpenSource: (table: string) => void
-  onOpenTarget: (table: string) => void
-}) {
-  if (entries.length === 0) {
-    return <div className="text-xs text-muted-foreground">No tables match the current filter.</div>
+  sourceConnectionName?: string
+  sourceDatabase: string
+  targetConnectionName?: string
+  targetDatabase: string
+  compareData: boolean
+}): string {
+  if (!sourceConnectionName && !targetConnectionName && !sourceDatabase && !targetDatabase) {
+    return 'Choose source and target connections before running Compare.'
   }
 
+  const sourceLabel = [sourceConnectionName, sourceDatabase].filter(Boolean).join(' / ') || 'Source pending'
+  const targetLabel = [targetConnectionName, targetDatabase].filter(Boolean).join(' / ') || 'Target pending'
+
+  return `${sourceLabel} -> ${targetLabel} · row comparison ${compareData ? 'on' : 'off'}`
+}
+
+function EmptyResultState({ title, description }: { title: string; description: string }) {
   return (
-    <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-2">
-      {entries.map((entry) => (
-        <div
-          key={entry.table}
-          className="rounded border border-border/60 bg-card/40 px-3 py-2 text-xs"
-        >
-          <div className="flex items-center gap-2 min-w-0">
-            <TableStatusIcon status={entry.status} />
-            <span className="truncate font-medium">{entry.table}</span>
-            <span className="ml-auto text-[10px] text-muted-foreground whitespace-nowrap">
-              {formatEntryStatus(entry)}
-            </span>
-          </div>
-          {entry.error && <div className="mt-1 text-[11px] text-red-300 break-all">{entry.error}</div>}
-          <TableOpenActions
-            className="mt-2 flex flex-wrap gap-2"
-            compareAvailable={entry.sourceExists && entry.targetExists}
-            sourceAvailable={entry.sourceExists}
-            targetAvailable={entry.targetExists}
-            onOpenCompare={() => onOpenCompare(entry.table)}
-            onOpenSource={() => onOpenSource(entry.table)}
-            onOpenTarget={() => onOpenTarget(entry.table)}
-          />
-        </div>
-      ))}
+    <div className="rounded border border-dashed border-border/60 bg-card/20 px-4 py-6 text-sm">
+      <div className="font-medium text-foreground">{title}</div>
+      <div className="mt-1 text-xs text-muted-foreground">{description}</div>
     </div>
   )
 }
 
-function TableStatusIcon({ status }: { status: TableCompareEntry['status'] }) {
-  if (status === 'comparing') {
-    return <LoaderCircle className="h-3.5 w-3.5 animate-spin text-sky-300" />
-  }
-  if (status === 'done') {
-    return <CheckCircle2 className="h-3.5 w-3.5 text-emerald-400" />
-  }
-  if (status === 'error') {
-    return <AlertCircle className="h-3.5 w-3.5 text-red-300" />
-  }
-  return <CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
-}
-
-function formatEntryStatus(entry: TableCompareEntry): string {
-  if (entry.status === 'error') return 'failed'
-  if (!entry.sourceExists) return 'target only'
-  if (!entry.targetExists) return 'source only'
-  if (entry.status === 'queued') return 'queued'
-  if (entry.status === 'comparing') return 'comparing'
-  if (entry.rowComparison && !entry.rowComparison.dataDiff.comparable) return 'row skipped'
-  if (entry.rowComparison && hasNoRowDifferences(entry.rowComparison) && !entry.tableDiff) return 'identical'
-  if (!entry.rowComparison && !entry.tableDiff) return 'no differences'
-  return 'ready'
-}
-
 function loadStoredDiffPanelPreferences(): DiffPanelPreferences {
-  if (typeof window === 'undefined') {
-    return {
-      statusFilter: 'all',
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY
-    }
-  }
+  if (typeof window === 'undefined') return parseDiffPanelPreferences(null)
 
   return parseDiffPanelPreferences(window.localStorage.getItem(DIFF_PANEL_PREFERENCES_KEY))
 }
@@ -730,15 +1005,15 @@ function RowComparisonSection({
   onOpenTarget: (table: string) => void
 }) {
   return (
-    <div className="border border-border rounded">
-      <div className="flex items-center gap-2 px-3 py-2 bg-card border-b border-border">
+    <div className="rounded-xl bg-card/15">
+      <div className="flex items-center gap-2 px-3 py-2">
         <strong className="text-sm">Row comparison</strong>
         <Badge>{rowComparisons.length} table(s)</Badge>
       </div>
-      <div className="space-y-3 p-3">
+      <div className="divide-y divide-border/30 border-t border-border/30">
         {rowComparisons.map((rowComparison) => (
-          <div key={rowComparison.table} className="rounded border border-border/60">
-            <div className="flex items-center gap-2 px-3 py-2 border-b border-border/60 bg-card/60">
+          <div key={rowComparison.table} className="px-3 py-3">
+            <div className="flex items-center gap-2">
               <strong className="text-sm">{rowComparison.table}</strong>
               <RowCompareBadge dataDiff={rowComparison.dataDiff} />
               <span className="mr-auto text-[10px] text-muted-foreground">
@@ -778,15 +1053,12 @@ function DiffColumn({ title, items }: { title: string; items: (string | null)[] 
           item ? (
             <li
               key={index}
-              className="overflow-x-auto rounded border border-border/60 bg-card px-2 py-1 whitespace-pre-wrap break-all"
+              className="overflow-x-auto rounded bg-card/70 px-2 py-1 whitespace-pre-wrap break-all"
             >
               {item}
             </li>
           ) : (
-            <li
-              key={index}
-              className="rounded border border-dashed border-border/40 px-2 py-1 opacity-30"
-            >
+            <li key={index} className="rounded bg-background/30 px-2 py-1 text-muted-foreground/60">
               —
             </li>
           )
@@ -812,9 +1084,9 @@ function formatIdx(i: { name: string; columns: string[]; unique: boolean } | und
 
 function DataDiffSection({ dataDiff }: { dataDiff: TableDataDiff }) {
   return (
-    <div className="px-3 pb-3 text-xs space-y-3">
-      <div className="rounded border border-border/60 bg-card px-3 py-2">
-        <div className="font-medium text-muted-foreground mb-1">Row diff</div>
+    <div className="mt-3 border-l border-border/40 pl-4 text-xs">
+      <div className="space-y-1 rounded-md bg-background/40 px-3 py-2">
+        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Row diff</div>
         {!dataDiff.comparable ? (
           <div className="text-amber-400">{dataDiff.reason || 'Row comparison skipped'}</div>
         ) : (
@@ -830,37 +1102,6 @@ function DataDiffSection({ dataDiff }: { dataDiff: TableDataDiff }) {
           </div>
         )}
       </div>
-      {dataDiff.samples.length > 0 && (
-        <div>
-          <div className="font-medium text-muted-foreground mb-1">Sample rows</div>
-          <div className="space-y-2">
-            {dataDiff.samples.map((sample, index) => (
-              <SampleRow key={`${sample.kind}-${sample.key}-${index}`} sample={sample} />
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
-function SampleRow({ sample }: { sample: TableDataDiffSample }) {
-  return (
-    <div className="rounded border border-border/60 bg-card px-3 py-2 space-y-2">
-      <div className="flex items-center gap-2">
-        <KindBadge kind={sample.kind} />
-        <code className="break-all">{sample.key}</code>
-      </div>
-      {sample.source && (
-        <pre className="overflow-auto whitespace-pre-wrap break-all rounded border border-border/50 px-2 py-1">
-{`source ${JSON.stringify(sample.source, null, 2)}`}
-        </pre>
-      )}
-      {sample.target && (
-        <pre className="overflow-auto whitespace-pre-wrap break-all rounded border border-border/50 px-2 py-1">
-{`target ${JSON.stringify(sample.target, null, 2)}`}
-        </pre>
-      )}
     </div>
   )
 }

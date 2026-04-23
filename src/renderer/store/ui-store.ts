@@ -40,6 +40,20 @@ interface UIState {
 
 type ActiveState = Pick<UIState, 'activeTabId' | 'rightView'>
 
+function compareViewReferencesTable(
+  view: Extract<WorkspaceView, { kind: 'table-compare' }>,
+  connectionId: string,
+  database: string,
+  table: string
+): boolean {
+  if (view.table !== table) return false
+
+  return (
+    (view.sourceConnectionId === connectionId && view.sourceDatabase === database) ||
+    (view.targetConnectionId === connectionId && view.targetDatabase === database)
+  )
+}
+
 function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
@@ -132,32 +146,69 @@ export const useUIStore = create<UIState>((set) => ({
       const nextView: WorkspaceView = { kind: 'table', connectionId, database, table: newTable }
       const nextTabId = getTabId(nextView)
       let changed = false
-      const workspaceTabs = state.workspaceTabs.map((tab) => {
-        if (tab.id !== oldTabId) return tab
-        changed = true
-        return createTab(nextView)
+      let removedActiveIndex = -1
+      const workspaceTabs = state.workspaceTabs.flatMap((tab, index) => {
+        if (tab.id === oldTabId) {
+          changed = true
+          return [createTab(nextView)]
+        }
+
+        if (
+          tab.view.kind === 'table-compare' &&
+          compareViewReferencesTable(tab.view, connectionId, database, oldTable)
+        ) {
+          changed = true
+          if (tab.id === state.activeTabId) {
+            removedActiveIndex = index
+          }
+          return []
+        }
+
+        return [tab]
       })
       if (!changed) return state
-      const activeTabId = state.activeTabId === oldTabId ? nextTabId : state.activeTabId
-      const rightView =
-        state.rightView.kind === 'table' &&
-        state.rightView.connectionId === connectionId &&
-        state.rightView.database === database &&
-        state.rightView.table === oldTable
-          ? nextView
-          : state.rightView
-      return { ...state, workspaceTabs, activeTabId, rightView }
+
+      if (state.activeTabId === oldTabId) {
+        return {
+          ...state,
+          workspaceTabs,
+          activeTabId: nextTabId,
+          rightView: nextView
+        }
+      }
+
+      if (removedActiveIndex >= 0) {
+        return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, removedActiveIndex - 1) }
+      }
+
+      return { ...state, workspaceTabs }
     }),
   closeTableTabs: (connectionId, database, table) =>
     set((state) => {
-      const tabId = getTabId({ kind: 'table', connectionId, database, table })
-      const index = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
-      if (index < 0) return state
-      const workspaceTabs = state.workspaceTabs.filter((tab) => tab.id !== tabId)
-      if (state.activeTabId !== tabId) {
+      let removedActiveIndex = -1
+      let changed = false
+      const workspaceTabs = state.workspaceTabs.filter((tab, index) => {
+        const shouldRemove =
+          (tab.view.kind === 'table' &&
+            tab.view.connectionId === connectionId &&
+            tab.view.database === database &&
+            tab.view.table === table) ||
+          (tab.view.kind === 'table-compare' &&
+            compareViewReferencesTable(tab.view, connectionId, database, table))
+
+        if (!shouldRemove) return true
+
+        changed = true
+        if (tab.id === state.activeTabId) {
+          removedActiveIndex = index
+        }
+        return false
+      })
+      if (!changed) return state
+      if (removedActiveIndex < 0) {
         return { ...state, workspaceTabs }
       }
-      return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, index - 1) }
+      return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, removedActiveIndex - 1) }
     }),
   toast: null,
   showToast: (message, level = 'info') => {

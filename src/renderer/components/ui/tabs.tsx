@@ -10,7 +10,7 @@ interface TabsProps {
 
 export function Tabs({ value, onValueChange, items, className }: TabsProps) {
   return (
-    <div className={cn('flex border-b border-border', className)}>
+    <div className={cn('flex overflow-x-auto border-b border-border', className)}>
       {items.map((it) => {
         const active = it.value === value
         return (
@@ -18,7 +18,7 @@ export function Tabs({ value, onValueChange, items, className }: TabsProps) {
             key={it.value}
             onClick={() => onValueChange(it.value)}
             className={cn(
-              'px-4 h-9 text-sm border-b-2 -mb-px transition-colors',
+              'h-9 shrink-0 whitespace-nowrap border-b-2 px-4 text-sm -mb-px transition-colors',
               active
                 ? 'border-primary text-foreground font-medium'
                 : 'border-transparent text-muted-foreground hover:text-foreground'

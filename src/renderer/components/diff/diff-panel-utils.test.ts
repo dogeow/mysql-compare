@@ -1,10 +1,17 @@
 import { describe, expect, it } from 'vitest'
 import type { TableCompareEntry } from './diff-panel-utils'
 import {
+  DEFAULT_COMPARE_SETUP_EXPANDED,
+  DEFAULT_DIFF_RESULT_TAB,
   DEFAULT_TABLE_COMPARE_CONCURRENCY,
+  DEFAULT_SOURCE_TABLES_EXPANDED,
+  DEFAULT_TABLE_SEARCH_QUERY,
+  DEFAULT_TARGET_TABLES_EXPANDED,
   filterComparisonEntries,
+  getPreferredComparisonTable,
   parseDiffPanelPreferences,
-  parseTableCompareConcurrency
+  parseTableCompareConcurrency,
+  prioritizeComparisonEntries
 } from './diff-panel-utils'
 
 describe('diff-panel-utils', () => {
@@ -143,30 +150,122 @@ describe('diff-panel-utils', () => {
     ])
   })
 
+  it('filters entries by table name after the status filter is applied', () => {
+    expect(filterComparisonEntries(entries, 'changed', 'row_').map((entry) => entry.table)).toEqual([
+      'row_changed_table'
+    ])
+
+    expect(filterComparisonEntries(entries, 'all', 'IDENT')).toEqual([
+      entries[3]!
+    ])
+  })
+
+  it('moves failed comparison entries to the top while preserving other entry order', () => {
+    expect(prioritizeComparisonEntries([
+      entries[0]!,
+      {
+        ...entries[1]!,
+        table: 'failed_table',
+        status: 'error',
+        error: 'boom'
+      },
+      entries[2]!
+    ]).map((entry) => entry.table)).toEqual([
+      'failed_table',
+      'comparing_table',
+      'row_changed_table'
+    ])
+  })
+
+  it('prefers the first failed entry and otherwise falls back to the current or first entry', () => {
+    const prioritizedEntries = prioritizeComparisonEntries([
+      entries[0]!,
+      {
+        ...entries[1]!,
+        table: 'failed_table',
+        status: 'error',
+        error: 'boom'
+      },
+      entries[2]!
+    ])
+
+    expect(getPreferredComparisonTable(prioritizedEntries, null)).toBe('failed_table')
+    expect(getPreferredComparisonTable(prioritizedEntries, 'row_changed_table')).toBe(
+      'row_changed_table'
+    )
+    expect(getPreferredComparisonTable(prioritizedEntries, 'missing')).toBe('failed_table')
+    expect(getPreferredComparisonTable([], null)).toBeNull()
+  })
+
   it('falls back to the default concurrency for invalid select values', () => {
     expect(parseTableCompareConcurrency('5')).toBe(5)
     expect(parseTableCompareConcurrency('invalid')).toBe(DEFAULT_TABLE_COMPARE_CONCURRENCY)
     expect(parseTableCompareConcurrency('0')).toBe(DEFAULT_TABLE_COMPARE_CONCURRENCY)
   })
 
+  it('restores the new status result tab from persisted preferences', () => {
+    expect(
+      parseDiffPanelPreferences(
+        JSON.stringify({
+          resultTab: 'status'
+        })
+      )
+    ).toEqual({
+      statusFilter: 'all',
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: 'status',
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+    })
+  })
+
   it('restores persisted filter and concurrency preferences with safe fallbacks', () => {
     expect(
       parseDiffPanelPreferences(
-        JSON.stringify({ statusFilter: 'row-changed', tableCompareConcurrency: 8 })
+        JSON.stringify({
+          statusFilter: 'row-changed',
+          tableCompareConcurrency: 8,
+          resultTab: 'data',
+          setupExpanded: false,
+          sourceTablesExpanded: true,
+          targetTablesExpanded: true,
+          tableSearchQuery: 'users'
+        })
       )
     ).toEqual({
       statusFilter: 'row-changed',
-      tableCompareConcurrency: 8
+      tableCompareConcurrency: 8,
+      resultTab: 'data',
+      setupExpanded: false,
+      sourceTablesExpanded: true,
+      targetTablesExpanded: true,
+      tableSearchQuery: 'users'
     })
 
-    expect(parseDiffPanelPreferences('{"statusFilter":"invalid","tableCompareConcurrency":99}')).toEqual({
+    expect(
+      parseDiffPanelPreferences(
+        '{"statusFilter":"invalid","tableCompareConcurrency":99,"resultTab":"invalid","setupExpanded":"no","sourceTablesExpanded":"yes","tableSearchQuery":123}'
+      )
+    ).toEqual({
       statusFilter: 'all',
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: DEFAULT_DIFF_RESULT_TAB,
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     })
 
     expect(parseDiffPanelPreferences('not-json')).toEqual({
       statusFilter: 'all',
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: DEFAULT_DIFF_RESULT_TAB,
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     })
   })
 })

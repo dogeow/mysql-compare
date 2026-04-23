@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type Ref, type SetStateAction, type UIEvent } from 'react'
 import { ArrowRight, RefreshCw } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Badge } from '@renderer/components/ui/badge'
@@ -41,27 +41,69 @@ export function TableCompareView({
   const [targetReloadToken, setTargetReloadToken] = useState(0)
   const [selectedSourceRows, setSelectedSourceRows] = useState<Record<string, Record<string, unknown>>>({})
   const [copying, setCopying] = useState(false)
+  const sourceScrollRef = useRef<HTMLDivElement | null>(null)
+  const targetScrollRef = useRef<HTMLDivElement | null>(null)
+  const syncScrollFrameRef = useRef<number | null>(null)
+  const syncingScrollRef = useRef(false)
+
+  const [sourceState, setSourceState] = useState<ComparedTableDataState>({
+    data: null,
+    error: null,
+    loading: false
+  })
+  const [targetState, setTargetState] = useState<ComparedTableDataState>({
+    data: null,
+    error: null,
+    loading: false
+  })
+
+  const stableOrderColumn = useMemo(() => {
+    const sourcePrimaryKey = sourceState.data?.primaryKey ?? []
+    const targetPrimaryKey = new Set(targetState.data?.primaryKey ?? [])
+    return sourcePrimaryKey.find((column) => targetPrimaryKey.has(column)) ?? null
+  }, [sourceState.data, targetState.data])
+  const stableOrderBy = useMemo(
+    () => (stableOrderColumn ? { column: stableOrderColumn, dir: 'ASC' as const } : undefined),
+    [stableOrderColumn]
+  )
 
   useEffect(() => {
     setPage(1)
     setSelectedSourceRows({})
   }, [sourceConnectionId, sourceDatabase, targetConnectionId, targetDatabase, table])
 
-  const sourceState = useComparedTableData({
+  useEffect(() => {
+    sourceScrollRef.current?.scrollTo({ top: 0, left: 0 })
+    targetScrollRef.current?.scrollTo({ top: 0, left: 0 })
+  }, [page, sourceConnectionId, sourceDatabase, targetConnectionId, targetDatabase, table])
+
+  useEffect(() => {
+    return () => {
+      if (syncScrollFrameRef.current !== null) {
+        cancelAnimationFrame(syncScrollFrameRef.current)
+      }
+    }
+  }, [])
+
+  useComparedTableData({
     connectionId: sourceConnectionId,
     database: sourceDatabase,
     table,
     page,
     pageSize: PAGE_SIZE,
-    reloadToken: sourceReloadToken
+    reloadToken: sourceReloadToken,
+    orderBy: stableOrderBy,
+    onStateChange: setSourceState
   })
-  const targetState = useComparedTableData({
+  useComparedTableData({
     connectionId: targetConnectionId,
     database: targetDatabase,
     table,
     page,
     pageSize: PAGE_SIZE,
-    reloadToken: targetReloadToken
+    reloadToken: targetReloadToken,
+    orderBy: stableOrderBy,
+    onStateChange: setTargetState
   })
 
   const sourceConnectionName =
@@ -194,6 +236,28 @@ export function TableCompareView({
     }
   }
 
+  const syncPaneScroll = (side: 'source' | 'target', event: UIEvent<HTMLDivElement>) => {
+    if (syncingScrollRef.current) return
+
+    const sourceElement = side === 'source' ? event.currentTarget : sourceScrollRef.current
+    const targetElement = side === 'source' ? targetScrollRef.current : event.currentTarget
+
+    if (!sourceElement || !targetElement) return
+
+    syncingScrollRef.current = true
+    targetElement.scrollTop = sourceElement.scrollTop
+    targetElement.scrollLeft = sourceElement.scrollLeft
+
+    if (syncScrollFrameRef.current !== null) {
+      cancelAnimationFrame(syncScrollFrameRef.current)
+    }
+
+    syncScrollFrameRef.current = requestAnimationFrame(() => {
+      syncingScrollRef.current = false
+      syncScrollFrameRef.current = null
+    })
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border bg-card px-4 py-3">
@@ -234,7 +298,9 @@ export function TableCompareView({
         </div>
         <div className="mt-3 flex flex-col gap-2 text-xs text-muted-foreground xl:flex-row xl:items-center xl:justify-between">
           <span>
-            Source selection is tracked by primary key so you can keep selected rows while paging.
+            {stableOrderColumn
+              ? `Both sides are ordered by ${stableOrderColumn} for page-by-page inspection, and source selection is tracked by primary key.`
+              : 'This view shows the same page from each table. If the tables do not share a primary key column, rows may not line up one-to-one.'}
           </span>
           <div className="flex items-center gap-2">
             <span>
@@ -260,26 +326,22 @@ export function TableCompareView({
         )}
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 xl:grid-cols-[minmax(0,1fr)_minmax(3rem,auto)_minmax(0,1fr)]">
+      <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 xl:grid-cols-2">
         <TableComparePane
           title="Source"
           connectionName={sourceConnectionName}
           database={sourceDatabase}
           table={table}
           state={sourceState}
+          scrollContainerRef={sourceScrollRef}
+          onScroll={(event) => syncPaneScroll('source', event)}
           selectedKeys={selectedKeySet}
-          showSelection
+          showSelection={sourceSelectionEnabled}
           selectionEnabled={sourceSelectionEnabled}
           onToggleAllVisible={toggleAllVisibleSourceRows}
           allVisibleSelected={allVisibleSelected}
           onToggleRow={toggleSourceRow}
         />
-
-        <div className="hidden xl:flex min-h-0 items-center justify-center text-muted-foreground">
-          <div className="rounded-full border border-border/60 bg-card/60 p-3">
-            <ArrowRight className="h-5 w-5" />
-          </div>
-        </div>
 
         <TableComparePane
           title="Target"
@@ -287,6 +349,9 @@ export function TableCompareView({
           database={targetDatabase}
           table={table}
           state={targetState}
+          scrollContainerRef={targetScrollRef}
+          onScroll={(event) => syncPaneScroll('target', event)}
+          leadingSpacer={sourceSelectionEnabled}
         />
       </div>
     </div>
@@ -299,7 +364,9 @@ function useComparedTableData({
   table,
   page,
   pageSize,
-  reloadToken
+  reloadToken,
+  orderBy,
+  onStateChange
 }: {
   connectionId: string
   database: string
@@ -307,19 +374,16 @@ function useComparedTableData({
   page: number
   pageSize: number
   reloadToken: number
-}): ComparedTableDataState {
+  orderBy?: { column: string; dir: 'ASC' | 'DESC' }
+  onStateChange: Dispatch<SetStateAction<ComparedTableDataState>>
+}): void {
   const requestIdRef = useRef(0)
-  const [state, setState] = useState<ComparedTableDataState>({
-    data: null,
-    error: null,
-    loading: false
-  })
 
   useEffect(() => {
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
 
-    setState((current) => ({
+    onStateChange((current) => ({
       ...current,
       loading: true,
       error: null
@@ -333,13 +397,14 @@ function useComparedTableData({
             database,
             table,
             page,
-            pageSize
+            pageSize,
+            orderBy
           })
         )
 
         if (requestIdRef.current !== requestId) return
 
-        setState({
+        onStateChange({
           data,
           error: null,
           loading: false
@@ -347,16 +412,14 @@ function useComparedTableData({
       } catch (err) {
         if (requestIdRef.current !== requestId) return
 
-        setState({
+        onStateChange({
           data: null,
           error: (err as Error).message,
           loading: false
         })
       }
     })()
-  }, [connectionId, database, page, pageSize, reloadToken, table])
-
-  return state
+  }, [connectionId, database, onStateChange, orderBy, page, pageSize, reloadToken, table])
 }
 
 function TableComparePane({
@@ -365,8 +428,11 @@ function TableComparePane({
   database,
   table,
   state,
+  scrollContainerRef,
+  onScroll,
   selectedKeys,
   showSelection = false,
+  leadingSpacer = false,
   selectionEnabled = false,
   allVisibleSelected = false,
   onToggleAllVisible,
@@ -377,8 +443,11 @@ function TableComparePane({
   database: string
   table: string
   state: ComparedTableDataState
+  scrollContainerRef?: Ref<HTMLDivElement>
+  onScroll?: (event: UIEvent<HTMLDivElement>) => void
   selectedKeys?: Set<string>
   showSelection?: boolean
+  leadingSpacer?: boolean
   selectionEnabled?: boolean
   allVisibleSelected?: boolean
   onToggleAllVisible?: () => void
@@ -410,7 +479,7 @@ function TableComparePane({
         </div>
       </div>
 
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div ref={scrollContainerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
         {state.loading && <div className="p-3 text-xs text-muted-foreground">Loading rows...</div>}
         {!state.loading && state.error && (
           <div className="p-3 text-xs text-red-300 break-all">{state.error}</div>
@@ -422,13 +491,15 @@ function TableComparePane({
           <Table>
             <THead>
               <Tr>
-                {showSelection && (
+                {(showSelection || leadingSpacer) && (
                   <Th className="w-8">
-                    <Checkbox
-                      checked={allVisibleSelected}
-                      onChange={() => onToggleAllVisible?.()}
-                      disabled={!selectionEnabled}
-                    />
+                    {showSelection && (
+                      <Checkbox
+                        checked={allVisibleSelected}
+                        onChange={() => onToggleAllVisible?.()}
+                        disabled={!selectionEnabled}
+                      />
+                    )}
                   </Th>
                 )}
                 {tableData.columns.map((column) => (
@@ -449,13 +520,15 @@ function TableComparePane({
 
                 return (
                   <Tr key={rowKey} className={cn(selected && 'bg-accent/30')}>
-                    {showSelection && (
+                    {(showSelection || leadingSpacer) && (
                       <Td>
-                        <Checkbox
-                          checked={selected}
-                          onChange={() => onToggleRow?.(row)}
-                          disabled={!selectionEnabled}
-                        />
+                        {showSelection && (
+                          <Checkbox
+                            checked={selected}
+                            onChange={() => onToggleRow?.(row)}
+                            disabled={!selectionEnabled}
+                          />
+                        )}
                       </Td>
                     )}
                     {tableData.columns.map((column) => (
