@@ -65,6 +65,33 @@ interface StickyDatabaseContext {
   database: string
 }
 
+const SIDEBAR_WIDTH_STORAGE_KEY = 'mysql-compare:sidebar-width'
+const DEFAULT_SIDEBAR_WIDTH = 288
+const MIN_SIDEBAR_WIDTH = 260
+const MAX_SIDEBAR_WIDTH = 520
+const MIN_WORKSPACE_WIDTH = 360
+const SIDEBAR_RESIZE_STEP = 16
+
+function getSidebarMaxWidth(): number {
+  if (typeof window === 'undefined') return MAX_SIDEBAR_WIDTH
+
+  return Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, window.innerWidth - MIN_WORKSPACE_WIDTH))
+}
+
+function clampSidebarWidth(width: number): number {
+  const maxWidth = getSidebarMaxWidth()
+  return Math.min(maxWidth, Math.max(MIN_SIDEBAR_WIDTH, width))
+}
+
+function loadStoredSidebarWidth(): number {
+  if (typeof window === 'undefined') return DEFAULT_SIDEBAR_WIDTH
+
+  const raw = window.localStorage.getItem(SIDEBAR_WIDTH_STORAGE_KEY)
+  const parsed = raw ? Number.parseInt(raw, 10) : Number.NaN
+
+  return Number.isFinite(parsed) ? clampSidebarWidth(parsed) : DEFAULT_SIDEBAR_WIDTH
+}
+
 export function Sidebar() {
   const { connections, refresh, remove } = useConnectionStore()
   const { rightView, setRightView, renameTableTabs, closeTableTabs, showToast } = useUIStore()
@@ -80,12 +107,29 @@ export function Sidebar() {
   const [actionBusy, setActionBusy] = useState(false)
   const [nodes, setNodes] = useState<Record<string, NodeState>>({})
   const [stickyDatabase, setStickyDatabase] = useState<StickyDatabaseContext | null>(null)
+  const [sidebarWidth, setSidebarWidth] = useState(() => loadStoredSidebarWidth())
   const treeScrollRef = useRef<HTMLDivElement | null>(null)
   const dbRowRefs = useRef<Record<string, { element: HTMLDivElement | null; connectionName: string; database: string }>>({})
+  const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   useEffect(() => {
     refresh()
   }, [refresh])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(SIDEBAR_WIDTH_STORAGE_KEY, String(sidebarWidth))
+  }, [sidebarWidth])
+
+  useEffect(() => {
+    const syncSidebarWidth = () => {
+      setSidebarWidth((current) => clampSidebarWidth(current))
+    }
+
+    syncSidebarWidth()
+    window.addEventListener('resize', syncSidebarWidth)
+    return () => window.removeEventListener('resize', syncSidebarWidth)
+  }, [])
 
   useEffect(() => {
     if (!tableMenu) return
@@ -136,6 +180,29 @@ export function Sidebar() {
     container.addEventListener('scroll', syncStickyDatabase)
     return () => container.removeEventListener('scroll', syncStickyDatabase)
   }, [connections, keyword, nodes])
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const state = resizeStateRef.current
+      if (!state) return
+      setSidebarWidth(clampSidebarWidth(state.startWidth + event.clientX - state.startX))
+    }
+
+    const onMouseUp = () => {
+      if (!resizeStateRef.current) return
+      resizeStateRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])
 
   const getDatabaseKey = (connectionId: string, database: string) => `${connectionId}:${database}`
 
@@ -378,9 +445,46 @@ export function Sidebar() {
     showToast('Connection deleted', 'success')
   }
 
+  const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    resizeStateRef.current = {
+      startX: event.clientX,
+      startWidth: sidebarWidth
+    }
+    document.body.style.cursor = 'col-resize'
+    document.body.style.userSelect = 'none'
+  }
+
+  const handleResizeKeyDown = (event: React.KeyboardEvent<HTMLDivElement>) => {
+    if (event.key === 'ArrowLeft') {
+      event.preventDefault()
+      setSidebarWidth((current) => clampSidebarWidth(current - SIDEBAR_RESIZE_STEP))
+      return
+    }
+
+    if (event.key === 'ArrowRight') {
+      event.preventDefault()
+      setSidebarWidth((current) => clampSidebarWidth(current + SIDEBAR_RESIZE_STEP))
+      return
+    }
+
+    if (event.key === 'Home') {
+      event.preventDefault()
+      setSidebarWidth(MIN_SIDEBAR_WIDTH)
+      return
+    }
+
+    if (event.key === 'End') {
+      event.preventDefault()
+      setSidebarWidth(clampSidebarWidth(MAX_SIDEBAR_WIDTH))
+    }
+  }
+
   return (
     <>
-      <div className="w-72 shrink-0 border-r border-border bg-card flex flex-col">
+      <div
+        className="relative shrink-0 border-r border-border bg-card flex flex-col"
+        style={{ width: sidebarWidth }}
+      >
         <div className="p-2 border-b border-border space-y-2">
           <div className="flex gap-1">
             <div className="relative flex-1">
@@ -543,6 +647,19 @@ export function Sidebar() {
             onSaved={() => refresh()}
           />
         )}
+
+        <div
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize sidebar"
+          aria-valuemin={MIN_SIDEBAR_WIDTH}
+          aria-valuemax={getSidebarMaxWidth()}
+          aria-valuenow={sidebarWidth}
+          tabIndex={0}
+          className="absolute right-0 top-0 bottom-0 w-2 cursor-col-resize bg-transparent transition-colors hover:bg-border/60 focus-visible:bg-border/60 focus-visible:outline-none"
+          onMouseDown={startResize}
+          onKeyDown={handleResizeKeyDown}
+        />
       </div>
 
       {tableMenu && (

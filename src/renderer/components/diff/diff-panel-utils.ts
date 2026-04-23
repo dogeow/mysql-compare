@@ -216,7 +216,7 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
       statusFilter: parseTableStatusFilter(parsed.statusFilter),
       tableCompareConcurrency: parseTableCompareConcurrency(String(parsed.tableCompareConcurrency ?? '')),
       resultTab: parseDiffResultTab(parsed.resultTab),
-      setupExpanded: parseBooleanPreference(parsed.setupExpanded, DEFAULT_COMPARE_SETUP_EXPANDED),
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
       sourceTablesExpanded: parseBooleanPreference(
         parsed.sourceTablesExpanded,
         DEFAULT_SOURCE_TABLES_EXPANDED

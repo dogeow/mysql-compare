@@ -106,7 +106,7 @@ function ComparisonDetailDrawer({
 }) {
   if (!entry) {
     return (
-      <div className="rounded border border-dashed border-border/60 bg-card/20 px-4 py-6 text-sm xl:sticky xl:top-0">
+      <div className="rounded border border-dashed border-border/60 bg-card/20 px-4 py-6 text-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:self-start xl:overflow-auto">
         <div className="font-medium text-foreground">No table selected</div>
         <div className="mt-1 text-xs text-muted-foreground">
           Select a table from the status list to inspect schema and row comparison details here.
@@ -116,7 +116,7 @@ function ComparisonDetailDrawer({
   }
 
   return (
-    <div className="rounded-xl border border-border/60 bg-card/50 xl:sticky xl:top-0">
+    <div className="rounded-xl border border-border/60 bg-card/50 xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:self-start xl:overflow-auto">
       <div className="flex items-start gap-2 border-b border-border/60 px-4 py-3">
         <TableStatusIcon status={entry.status} />
         <div className="min-w-0 flex-1">

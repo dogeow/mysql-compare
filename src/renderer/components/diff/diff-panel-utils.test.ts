@@ -221,7 +221,7 @@ describe('diff-panel-utils', () => {
     })
   })
 
-  it('restores persisted filter and concurrency preferences with safe fallbacks', () => {
+  it('restores persisted filter and concurrency preferences while keeping compare setup expanded initially', () => {
     expect(
       parseDiffPanelPreferences(
         JSON.stringify({
@@ -238,7 +238,7 @@ describe('diff-panel-utils', () => {
       statusFilter: 'row-changed',
       tableCompareConcurrency: 8,
       resultTab: 'data',
-      setupExpanded: false,
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
       sourceTablesExpanded: true,
       targetTablesExpanded: true,
       tableSearchQuery: 'users'

@@ -64,6 +64,8 @@ export function DiffPanel() {
   const [tgtDb, setTgtDb] = useState('')
   const [srcDbs, setSrcDbs] = useState<string[]>([])
   const [tgtDbs, setTgtDbs] = useState<string[]>([])
+  const [srcDbsLoading, setSrcDbsLoading] = useState(false)
+  const [tgtDbsLoading, setTgtDbsLoading] = useState(false)
   const [comparePhase, setComparePhase] = useState<ComparePhase>('idle')
   const [compareContext, setCompareContext] = useState<CompareContext | null>(null)
   const [sourceTables, setSourceTables] = useState<string[]>([])
@@ -90,31 +92,67 @@ export function DiffPanel() {
     refresh()
   }, [refresh])
 
-  const loadDbs = async (id: string, setter: (l: string[]) => void) => {
-    if (!id) return
-    try {
-      setter(await unwrap(api.db.listDatabases(id)))
-    } catch (err) {
-      showToast((err as Error).message, 'error')
-    }
-  }
-
   useEffect(() => {
-    loadDbs(srcId, setSrcDbs)
-  }, [srcId])
-  useEffect(() => {
-    loadDbs(tgtId, setTgtDbs)
-  }, [tgtId])
-
-  useEffect(() => {
+    let active = true
     setSrcDb('')
     setSrcDbs([])
-  }, [srcId])
+    if (!srcId) {
+      setSrcDbsLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    setSrcDbsLoading(true)
+    void unwrap(api.db.listDatabases(srcId))
+      .then((databases) => {
+        if (!active) return
+        setSrcDbs(databases)
+      })
+      .catch((err) => {
+        if (!active) return
+        showToast((err as Error).message, 'error')
+      })
+      .finally(() => {
+        if (!active) return
+        setSrcDbsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [showToast, srcId])
 
   useEffect(() => {
+    let active = true
     setTgtDb('')
     setTgtDbs([])
-  }, [tgtId])
+    if (!tgtId) {
+      setTgtDbsLoading(false)
+      return () => {
+        active = false
+      }
+    }
+
+    setTgtDbsLoading(true)
+    void unwrap(api.db.listDatabases(tgtId))
+      .then((databases) => {
+        if (!active) return
+        setTgtDbs(databases)
+      })
+      .catch((err) => {
+        if (!active) return
+        showToast((err as Error).message, 'error')
+      })
+      .finally(() => {
+        if (!active) return
+        setTgtDbsLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [showToast, tgtId])
 
   useEffect(() => {
     persistDiffPanelPreferences(preferences)
@@ -313,6 +351,8 @@ export function DiffPanel() {
     targetDatabase: tgtDb,
     compareData
   })
+  const sourceDatabaseOptions = buildDatabaseOptions(srcId, srcDbs, srcDbsLoading)
+  const targetDatabaseOptions = buildDatabaseOptions(tgtId, tgtDbs, tgtDbsLoading)
 
   useEffect(() => {
     const preferredTable = getPreferredComparisonTable(
@@ -421,46 +461,65 @@ export function DiffPanel() {
         </div>
 
         {setupExpanded && (
-          <div className="grid grid-cols-1 gap-3 border-t border-border/40 bg-card/10 px-4 py-3 xl:grid-cols-2">
-            <div className="rounded-lg bg-background/30 p-3">
-              <div className="mb-3 flex items-center gap-2">
-                <h3 className="text-sm font-semibold">Source</h3>
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                  {formatEndpointSelectionSummary(selectedSourceConnection?.name, srcDb, 'Choose source')}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="border-t border-border/40 bg-card/10 px-4 py-3">
+            <div className="rounded-xl bg-background/25 p-4">
+              <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 xl:grid-cols-4">
+                <div className="space-y-1 md:col-span-2 xl:col-span-2">
+                  <div className="flex items-baseline gap-3">
+                    <h3 className="shrink-0 text-sm font-semibold">Source</h3>
+                    <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                      {formatEndpointSelectionSummary(selectedSourceConnection?.name, srcDb, 'Choose source')}
+                    </span>
+                  </div>
+                </div>
+                <div className="space-y-1 md:col-span-2 xl:col-span-2">
+                  <div className="flex items-baseline gap-3">
+                    <h3 className="shrink-0 text-sm font-semibold">Target</h3>
+                    <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                      {formatEndpointSelectionSummary(selectedTargetConnection?.name, tgtDb, 'Choose target')}
+                    </span>
+                  </div>
+                </div>
+
                 <div className="min-w-0 space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground">Connection</Label>
                   <Select options={connOptions} value={srcId} onChange={(e) => setSrcId(e.target.value)} />
                 </div>
                 <div className="min-w-0 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">Database</Label>
+                  <div className="flex min-h-[16px] items-center gap-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Database</Label>
+                    {srcDbsLoading && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <LoaderCircle className="h-3 w-3 animate-spin" />
+                        Loading...
+                      </span>
+                    )}
+                  </div>
                   <Select
-                    options={[{ value: '', label: '— select —' }, ...srcDbs.map((d) => ({ value: d, label: d }))]}
+                    options={sourceDatabaseOptions}
                     value={srcDb}
+                    disabled={!srcId || srcDbsLoading}
                     onChange={(e) => setSrcDb(e.target.value)}
                   />
                 </div>
-              </div>
-            </div>
-            <div className="rounded-lg bg-background/30 p-3">
-              <div className="mb-3 flex items-center gap-2">
-                <h3 className="text-sm font-semibold">Target</h3>
-                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
-                  {formatEndpointSelectionSummary(selectedTargetConnection?.name, tgtDb, 'Choose target')}
-                </span>
-              </div>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <div className="min-w-0 space-y-1.5">
                   <Label className="text-[11px] text-muted-foreground">Connection</Label>
                   <Select options={connOptions} value={tgtId} onChange={(e) => setTgtId(e.target.value)} />
                 </div>
                 <div className="min-w-0 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">Database</Label>
+                  <div className="flex min-h-[16px] items-center gap-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Database</Label>
+                    {tgtDbsLoading && (
+                      <span className="inline-flex items-center gap-1 text-[11px] text-muted-foreground">
+                        <LoaderCircle className="h-3 w-3 animate-spin" />
+                        Loading...
+                      </span>
+                    )}
+                  </div>
                   <Select
-                    options={[{ value: '', label: '— select —' }, ...tgtDbs.map((d) => ({ value: d, label: d }))]}
+                    options={targetDatabaseOptions}
                     value={tgtDb}
+                    disabled={!tgtId || tgtDbsLoading}
                     onChange={(e) => setTgtDb(e.target.value)}
                   />
                 </div>
@@ -538,23 +597,31 @@ export function DiffPanel() {
       </div>
 
       {compareContext && (
-        <div className="grid grid-cols-1 xl:grid-cols-2 gap-3 px-4 py-3 border-b border-border">
-          <TableListPanel
-            title="Source tables"
-            tables={sourceTables}
-            phase={comparePhase}
-            expanded={tableListsExpanded}
-            onToggle={toggleTableLists}
-            toggleLabel={tableListsExpanded ? 'Hide both' : 'Show both'}
-          />
-          <TableListPanel
-            title="Target tables"
-            tables={targetTables}
-            phase={comparePhase}
-            expanded={tableListsExpanded}
-            onToggle={toggleTableLists}
-            toggleLabel={tableListsExpanded ? 'Hide both' : 'Show both'}
-          />
+        <div className="px-4 py-3 border-b border-border">
+          <div className="rounded-xl bg-card/15 px-3 py-3">
+            <button
+              type="button"
+              className="flex w-full items-center gap-2 border-b border-border/30 pb-2 text-left"
+              onClick={toggleTableLists}
+            >
+              {tableListsExpanded ? (
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              ) : (
+                <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+              )}
+              <span className="text-xs font-medium text-muted-foreground">Source &amp; target tables</span>
+              <div className="ml-auto flex items-center gap-2">
+                <Badge>{sourceTables.length}</Badge>
+                <Badge>{targetTables.length}</Badge>
+              </div>
+            </button>
+            {tableListsExpanded && (
+              <div className="mt-3 grid grid-cols-1 gap-3 xl:grid-cols-2">
+                <TableListPanel title="Source tables" tables={sourceTables} phase={comparePhase} expanded />
+                <TableListPanel title="Target tables" tables={targetTables} phase={comparePhase} expanded />
+              </div>
+            )}
+          </div>
         </div>
       )}
 
@@ -566,7 +633,7 @@ export function DiffPanel() {
             </div>
           )}
           {compareContext && (
-            <div className="overflow-hidden rounded-xl border border-border/60 bg-card/10">
+            <div className="rounded-xl border border-border/60 bg-card/10">
               <Tabs
                 className="px-4 pt-3"
                 value={resultTab}
@@ -850,52 +917,28 @@ function TableListPanel({
   title,
   tables,
   phase,
-  expanded,
-  onToggle,
-  toggleLabel
+  expanded
 }: {
   title: string
   tables: string[]
   phase: ComparePhase
   expanded: boolean
-  onToggle: () => void
-  toggleLabel?: string
 }) {
   return (
     <div className="rounded-xl bg-card/15 px-3 py-3">
       <div className="flex items-center justify-between gap-2 border-b border-border/30 pb-2">
-        <button
-          type="button"
-          className="flex min-w-0 items-center gap-2 text-left"
-          onClick={onToggle}
-        >
-          {expanded ? (
-            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-          ) : (
-            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-          )}
+        <div className="flex min-w-0 items-center gap-2 text-left">
           <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        </button>
+        </div>
         <div className="flex items-center gap-2">
           <Badge>{tables.length}</Badge>
-          <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onToggle}>
-            {toggleLabel ?? (expanded ? 'Hide' : 'Show')}
-          </Button>
         </div>
       </div>
-      {!expanded ? (
-        <div className="mt-3 text-xs text-muted-foreground">
-          {phase === 'loading-tables'
-            ? 'Loading tables...'
-            : tables.length === 0
-              ? 'No tables found'
-              : `${tables.length} table(s) hidden to keep the compare view compact.`}
-        </div>
-      ) : tables.length === 0 ? (
+      {expanded && tables.length === 0 ? (
         <div className="mt-3 text-xs text-muted-foreground">
           {phase === 'loading-tables' ? 'Loading tables...' : 'No tables found'}
         </div>
-      ) : (
+      ) : expanded ? (
         <div className="mt-3 max-h-40 overflow-auto pr-1">
           <div className="space-y-1.5">
           {tables.map((table) => (
@@ -905,7 +948,7 @@ function TableListPanel({
           ))}
           </div>
         </div>
-      )}
+      ) : null}
     </div>
   )
 }
@@ -941,6 +984,18 @@ function formatEndpointSelectionSummary(
   const parts = [connectionName, database].filter(Boolean)
 
   return parts.length > 0 ? parts.join(' / ') : fallback
+}
+
+function buildDatabaseOptions(connectionId: string, databases: string[], loading: boolean) {
+  if (!connectionId) {
+    return [{ value: '', label: 'Select connection first' }]
+  }
+
+  if (loading) {
+    return [{ value: '', label: 'Loading databases...' }]
+  }
+
+  return [{ value: '', label: '— select —' }, ...databases.map((database) => ({ value: database, label: database }))]
 }
 
 function EmptyResultState({ title, description }: { title: string; description: string }) {
