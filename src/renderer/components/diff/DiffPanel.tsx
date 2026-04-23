@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { AlertCircle, CheckCircle2, ChevronDown, ChevronRight, CircleDashed, LoaderCircle } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
+import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Input } from '@renderer/components/ui/input'
 import { Select } from '@renderer/components/ui/select'
 import { Label } from '@renderer/components/ui/label'
@@ -270,7 +271,6 @@ export function DiffPanel() {
   )
   const loading = comparePhase === 'loading-tables' || comparePhase === 'comparing'
   const visibleSchemaDiffs = diff?.tableDiffs.filter(hasSchemaOrPresenceDiff) ?? []
-  const rowCompareSummary = diff ? summarizeRowComparisons(diff.rowComparisons) : null
   const filteredComparisonEntries = useMemo(
     () => filterComparisonEntries(comparisonEntries, statusFilter, tableSearchQuery),
     [comparisonEntries, statusFilter, tableSearchQuery]
@@ -386,7 +386,7 @@ export function DiffPanel() {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border">
-        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
+        <div className="flex flex-wrap items-center gap-3 px-4 py-3">
           <button
             type="button"
             className="flex min-w-0 items-center gap-2 text-left"
@@ -421,16 +421,21 @@ export function DiffPanel() {
         </div>
 
         {setupExpanded && (
-          <div className="grid grid-cols-1 gap-4 border-t border-border/60 px-4 py-4 xl:grid-cols-2">
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Source</h3>
+          <div className="grid grid-cols-1 gap-3 border-t border-border/40 bg-card/10 px-4 py-3 xl:grid-cols-2">
+            <div className="rounded-lg bg-background/30 p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <h3 className="text-sm font-semibold">Source</h3>
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                  {formatEndpointSelectionSummary(selectedSourceConnection?.name, srcDb, 'Choose source')}
+                </span>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-2 min-w-0">
-                  <Label>Connection</Label>
+                <div className="min-w-0 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Connection</Label>
                   <Select options={connOptions} value={srcId} onChange={(e) => setSrcId(e.target.value)} />
                 </div>
-                <div className="space-y-2 min-w-0">
-                  <Label>Database</Label>
+                <div className="min-w-0 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Database</Label>
                   <Select
                     options={[{ value: '', label: '— select —' }, ...srcDbs.map((d) => ({ value: d, label: d }))]}
                     value={srcDb}
@@ -439,15 +444,20 @@ export function DiffPanel() {
                 </div>
               </div>
             </div>
-            <div className="space-y-2">
-              <h3 className="text-sm font-semibold">Target</h3>
+            <div className="rounded-lg bg-background/30 p-3">
+              <div className="mb-3 flex items-center gap-2">
+                <h3 className="text-sm font-semibold">Target</h3>
+                <span className="min-w-0 truncate text-[11px] text-muted-foreground">
+                  {formatEndpointSelectionSummary(selectedTargetConnection?.name, tgtDb, 'Choose target')}
+                </span>
+              </div>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="space-y-2 min-w-0">
-                  <Label>Connection</Label>
+                <div className="min-w-0 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Connection</Label>
                   <Select options={connOptions} value={tgtId} onChange={(e) => setTgtId(e.target.value)} />
                 </div>
-                <div className="space-y-2 min-w-0">
-                  <Label>Database</Label>
+                <div className="min-w-0 space-y-1.5">
+                  <Label className="text-[11px] text-muted-foreground">Database</Label>
                   <Select
                     options={[{ value: '', label: '— select —' }, ...tgtDbs.map((d) => ({ value: d, label: d }))]}
                     value={tgtDb}
@@ -460,55 +470,71 @@ export function DiffPanel() {
         )}
       </div>
 
-      <div className="flex flex-wrap items-center gap-2 border-b border-border px-4 py-2">
-        <Button onClick={onCompare} disabled={loading}>
-          {loading ? 'Comparing...' : 'Compare'}
-        </Button>
-        <label className="flex items-center gap-2 text-xs text-muted-foreground">
-          <input
-            type="checkbox"
-            checked={compareData}
-            onChange={(event) => setCompareData(event.target.checked)}
-          />
-          Compare rows
-        </label>
-        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-          <span>Parallel</span>
-          <Select
-            className="w-24"
-            value={String(tableCompareConcurrency)}
-            disabled={loading}
-            onChange={(event) =>
-              setPreferences((current) => ({
-                ...current,
-                tableCompareConcurrency: parseTableCompareConcurrency(event.target.value)
-              }))
-            }
-            options={TABLE_COMPARE_CONCURRENCY_OPTIONS.map((value) => ({
-              value: String(value),
-              label: `${value}`
-            }))}
-          />
-        </div>
-        <Button
-          variant="outline"
-          disabled={comparePhase !== 'done' || !diff || diff.tableDiffs.length === 0}
-          onClick={() => setShowSync(true)}
-        >
-          Plan Sync →
-        </Button>
-        {diff && (
-          <div className="ml-auto flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-            <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-              {diff.tableDiffs.length} table(s) differ
-            </Badge>
-            {rowCompareSummary && (
-              <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                {rowCompareSummary}
-              </Badge>
-            )}
+      <div className="border-b border-border px-4 py-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-card/15 p-1.5">
+            <Button size="sm" className="h-8 px-3" onClick={onCompare} disabled={loading}>
+              {loading ? 'Comparing...' : 'Compare'}
+            </Button>
+            <label className="flex h-8 items-center gap-2 rounded-lg bg-background/35 px-2.5 text-xs text-muted-foreground">
+              <Checkbox
+                className="h-3.5 w-3.5"
+                checked={compareData}
+                onChange={(event) => setCompareData(event.target.checked)}
+              />
+              <span>Compare rows</span>
+            </label>
+            <div className="flex h-8 items-center gap-2 rounded-lg bg-background/35 px-2.5 text-xs text-muted-foreground">
+              <span>Parallel</span>
+              <Select
+                className="h-7 w-20 border-border/50 bg-transparent px-2 text-xs"
+                value={String(tableCompareConcurrency)}
+                disabled={loading}
+                onChange={(event) =>
+                  setPreferences((current) => ({
+                    ...current,
+                    tableCompareConcurrency: parseTableCompareConcurrency(event.target.value)
+                  }))
+                }
+                options={TABLE_COMPARE_CONCURRENCY_OPTIONS.map((value) => ({
+                  value: String(value),
+                  label: `${value}`
+                }))}
+              />
+            </div>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-3"
+              disabled={comparePhase !== 'done' || !diff || diff.tableDiffs.length === 0}
+              onClick={() => setShowSync(true)}
+            >
+              Plan Sync
+            </Button>
           </div>
-        )}
+          {diff && (
+            <div className="ml-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                {diff.tableDiffs.length} structure
+              </Badge>
+              {compareData && diff.rowComparisons.length > 0 && (
+                <>
+                  <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                    {diff.rowComparisons.length} checked
+                  </Badge>
+                  {comparePhase === 'done' && rowChangedTableCount === 0 && rowSkippedTableCount === 0 ? (
+                    <Badge variant="success">rows identical</Badge>
+                  ) : (
+                    <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
+                      {rowChangedTableCount} changed
+                    </Badge>
+                  )}
+                </>
+              )}
+              {compareData && rowSkippedTableCount > 0 && <Badge variant="warning">{rowSkippedTableCount} skipped</Badge>}
+            </div>
+          )}
+        </div>
       </div>
 
       {compareContext && (
@@ -836,8 +862,8 @@ function TableListPanel({
   toggleLabel?: string
 }) {
   return (
-    <div className="rounded border border-border/60 bg-card/40 p-3">
-      <div className="flex items-center justify-between gap-2">
+    <div className="rounded-xl bg-card/15 px-3 py-3">
+      <div className="flex items-center justify-between gap-2 border-b border-border/30 pb-2">
         <button
           type="button"
           className="flex min-w-0 items-center gap-2 text-left"
@@ -858,7 +884,7 @@ function TableListPanel({
         </div>
       </div>
       {!expanded ? (
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-3 text-xs text-muted-foreground">
           {phase === 'loading-tables'
             ? 'Loading tables...'
             : tables.length === 0
@@ -866,16 +892,18 @@ function TableListPanel({
               : `${tables.length} table(s) hidden to keep the compare view compact.`}
         </div>
       ) : tables.length === 0 ? (
-        <div className="mt-2 text-xs text-muted-foreground">
+        <div className="mt-3 text-xs text-muted-foreground">
           {phase === 'loading-tables' ? 'Loading tables...' : 'No tables found'}
         </div>
       ) : (
-        <div className="mt-2 max-h-40 overflow-auto space-y-1">
+        <div className="mt-3 max-h-40 overflow-auto pr-1">
+          <div className="space-y-1.5">
           {tables.map((table) => (
-            <div key={table} className="rounded border border-border/50 px-2 py-1 text-xs font-mono">
-              {table}
-            </div>
+              <div key={table} className="rounded-md bg-background/35 px-3 py-1.5 text-xs font-mono">
+                {table}
+              </div>
           ))}
+          </div>
         </div>
       )}
     </div>
@@ -905,6 +933,16 @@ function formatCompareSetupSummary({
   return `${sourceLabel} -> ${targetLabel} · row comparison ${compareData ? 'on' : 'off'}`
 }
 
+function formatEndpointSelectionSummary(
+  connectionName: string | undefined,
+  database: string,
+  fallback: string
+): string {
+  const parts = [connectionName, database].filter(Boolean)
+
+  return parts.length > 0 ? parts.join(' / ') : fallback
+}
+
 function EmptyResultState({ title, description }: { title: string; description: string }) {
   return (
     <div className="rounded border border-dashed border-border/60 bg-card/20 px-4 py-6 text-sm">
@@ -923,30 +961,6 @@ function loadStoredDiffPanelPreferences(): DiffPanelPreferences {
 function persistDiffPanelPreferences(preferences: DiffPanelPreferences): void {
   if (typeof window === 'undefined') return
   window.localStorage.setItem(DIFF_PANEL_PREFERENCES_KEY, JSON.stringify(preferences))
-}
-
-function summarizeRowComparisons(rowComparisons: TableRowComparison[]): string | null {
-  if (rowComparisons.length === 0) return null
-
-  let identical = 0
-  let changed = 0
-  let skipped = 0
-
-  for (const { dataDiff } of rowComparisons) {
-    if (!dataDiff.comparable) {
-      skipped += 1
-      continue
-    }
-
-    if (dataDiff.sourceOnly === 0 && dataDiff.targetOnly === 0 && dataDiff.modified === 0) {
-      identical += 1
-      continue
-    }
-
-    changed += 1
-  }
-
-  return `${rowComparisons.length} row-checked · ${changed} changed · ${identical} identical${skipped > 0 ? ` · ${skipped} skipped` : ''}`
 }
 
 function KindBadge({ kind }: { kind: string }) {
