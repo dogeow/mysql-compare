@@ -30,6 +30,7 @@ interface SyncContext {
   targetDriver: DbDriver
   sourceTables: Set<string>
   targetTables: Set<string>
+  crossEngine: boolean
 }
 
 export class SyncService {
@@ -117,7 +118,8 @@ export class SyncService {
       sourceDriver,
       targetDriver,
       sourceTables: new Set(sourceTableList),
-      targetTables: new Set(targetTableList)
+      targetTables: new Set(targetTableList),
+      crossEngine: sourceDriver.engine !== targetDriver.engine
     }
   }
 
@@ -140,6 +142,19 @@ export class SyncService {
         schema: emptySchema(table),
         setupSQLs: [],
         skip: true
+      }
+    }
+
+    if (context.crossEngine && req.syncStructure) {
+      if (!existsInTarget) {
+        throw new Error(
+          `Cross-engine structure sync is not supported for "${table}". Create target tables first (for example with Laravel migrate), then rerun with Structure unchecked and Data checked.`
+        )
+      }
+      if (req.existingTableStrategy === 'overwrite-structure') {
+        throw new Error(
+          'Cross-engine structure overwrite is not supported. Recreate the target schema outside the tool, then rerun a data-only sync.'
+        )
       }
     }
 
@@ -171,7 +186,9 @@ export class SyncService {
             break
           case 'append-data':
           case 'truncate-and-import':
-            description.push('keep target structure')
+            description.push(
+              context.crossEngine ? 'reuse existing target structure' : 'keep target structure'
+            )
             break
         }
       } else {

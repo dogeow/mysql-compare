@@ -38,6 +38,18 @@ const syncDialect: Dialect = {
   stripDefiner: (sql) => sql
 }
 
+const pgSyncDialect: Dialect = {
+  engine: 'postgres',
+  quoteIdent: (name) => `"${name}"`,
+  quoteTable: (database, table) => `"${database}"."${table}"`,
+  formatLiteral: (value) => JSON.stringify(value),
+  renderInsert: (database, table, _columns, rows) =>
+    `INSERT INTO "${database}"."${table}" rows:${rows.length}`,
+  renderTruncate: (database, table) => `TRUNCATE "${database}"."${table}"`,
+  renderDropIfExists: (database, table) => `DROP "${database}"."${table}"`,
+  stripDefiner: (sql) => sql
+}
+
 describe('SyncService', () => {
   beforeEach(() => {
     getDriver.mockReset()
@@ -151,6 +163,65 @@ describe('SyncService', () => {
       }
     ])
   })
+
+  it('supports cross-engine data-only preview when target tables already exist', async () => {
+    const schema = buildSchema('users')
+    const sourceDriver = createFakeDriver({
+      connectionId: 'source',
+      engine: 'mysql',
+      dialect: syncDialect,
+      tablesByDatabase: { source_db: ['users'] },
+      streamBatches: [[{ id: 1 }]]
+    })
+    const targetDriver = createFakeDriver({
+      connectionId: 'target',
+      engine: 'postgres',
+      dialect: pgSyncDialect,
+      tablesByDatabase: { target_db: ['users'] }
+    })
+
+    mockDrivers(sourceDriver.driver, targetDriver.driver)
+    getTableSchema.mockResolvedValue(schema)
+
+    const plan = await syncService.buildPlan(
+      createSyncRequest({
+        syncStructure: false,
+        existingTableStrategy: 'append-data'
+      })
+    )
+
+    expect(plan.steps).toEqual([
+      {
+        table: 'users',
+        description: 'data preview (50 rows)',
+        sqls: ['INSERT INTO "target_db"."users" rows:1']
+      }
+    ])
+  })
+
+  it('rejects cross-engine structure creation when target table is missing', async () => {
+    const schema = buildSchema('users')
+    const sourceDriver = createFakeDriver({
+      connectionId: 'source',
+      engine: 'mysql',
+      dialect: syncDialect,
+      tablesByDatabase: { source_db: ['users'] },
+      streamBatches: [[{ id: 1 }]]
+    })
+    const targetDriver = createFakeDriver({
+      connectionId: 'target',
+      engine: 'postgres',
+      dialect: pgSyncDialect,
+      tablesByDatabase: { target_db: [] }
+    })
+
+    mockDrivers(sourceDriver.driver, targetDriver.driver)
+    getTableSchema.mockResolvedValue(schema)
+
+    await expect(syncService.buildPlan(createSyncRequest())).rejects.toThrow(
+      'Cross-engine structure sync is not supported'
+    )
+  })
 })
 
 function mockDrivers(sourceDriver: DbDriver, targetDriver: DbDriver): void {
@@ -161,6 +232,8 @@ function mockDrivers(sourceDriver: DbDriver, targetDriver: DbDriver): void {
 
 function createFakeDriver(options: {
   connectionId: string
+  engine?: DbDriver['engine']
+  dialect?: Dialect
   tablesByDatabase?: Record<string, string[]>
   streamBatches?: Record<string, unknown>[][]
 }): {
@@ -180,9 +253,9 @@ function createFakeDriver(options: {
   const executeSQL = vi.fn(async () => undefined)
 
   const driver = {
-    engine: 'mysql',
+    engine: options.engine ?? 'mysql',
     connectionId: options.connectionId,
-    dialect: syncDialect,
+    dialect: options.dialect ?? syncDialect,
     listDatabases: async () => [],
     listTables,
     getTableSchema: async () => buildSchema('unused'),

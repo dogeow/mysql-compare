@@ -6,6 +6,7 @@ import { TableDataView } from '@renderer/components/table-view/TableDataView'
 import { TableInfoView } from '@renderer/components/table-view/TableInfoView'
 import { TableStructureView } from '@renderer/components/table-view/TableStructureView'
 import { DiffPanel } from '@renderer/components/diff/DiffPanel'
+import { TableCompareView } from '@renderer/components/diff/TableCompareView'
 import { SQLQueryView } from '@renderer/components/sql/SQLQueryView'
 import { useUIStore, type WorkspaceTab } from '@renderer/store/ui-store'
 import { cn } from '@renderer/lib/utils'
@@ -79,7 +80,7 @@ export function Workspace() {
                 className="flex min-w-0 items-center gap-2"
                 onClick={() => setActiveTab(tab.id)}
               >
-                {tab.view.kind === 'diff' ? (
+                {tab.view.kind === 'diff' || tab.view.kind === 'table-compare' ? (
                   <GitCompareArrows className="h-3.5 w-3.5 shrink-0" />
                 ) : tab.view.kind === 'sql' ? (
                   <FileCode2 className="h-3.5 w-3.5 shrink-0" />
@@ -112,10 +113,18 @@ export function Workspace() {
           return (
             <div
               key={tab.id}
-              className={cn('h-full flex-col overflow-hidden', active ? 'flex' : 'hidden')}
+              className={cn('h-full min-h-0 flex-col overflow-hidden', active ? 'flex' : 'hidden')}
             >
               {tab.view.kind === 'diff' ? (
                 <DiffPanel />
+              ) : tab.view.kind === 'table-compare' ? (
+                <TableCompareView
+                  sourceConnectionId={tab.view.sourceConnectionId}
+                  sourceDatabase={tab.view.sourceDatabase}
+                  targetConnectionId={tab.view.targetConnectionId}
+                  targetDatabase={tab.view.targetDatabase}
+                  table={tab.view.table}
+                />
               ) : tab.view.kind === 'sql' ? (
                 <SQLQueryView
                   connectionId={tab.view.connectionId}

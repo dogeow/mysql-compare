@@ -1,6 +1,6 @@
 # MySQL Compare
 
-A lightweight desktop MySQL client (Electron + React + TypeScript) inspired by Navicat / DBeaver. Focused on **MySQL only**, with first-class **SSH tunnel**, browse / edit, and **schema diff & sync**.
+A lightweight desktop database compare client (Electron + React + TypeScript) inspired by Navicat / DBeaver. It now supports **MySQL and PostgreSQL** connections, with first-class **SSH tunnel**, browse / edit, **schema diff**, **row-level data diff**, and data sync.
 
 ## Architecture
 
@@ -13,11 +13,11 @@ Preload  (the only place using ipcRenderer)
      ▼
 Main process
      ├─ ipc/         channel routing
-     ├─ services/    connection / mysql / ssh / schema / diff / sync
+     ├─ services/    connection / mysql / postgres / ssh / schema / diff / sync
      └─ store/       electron-store + safeStorage encryption
 ```
 
-The renderer NEVER touches MySQL or SSH directly — every DB action is an IPC call.
+The renderer NEVER touches the database drivers or SSH directly — every DB action is an IPC call.
 
 ## Run
 
@@ -36,15 +36,16 @@ npm run dist:win      # win nsis
 
 ## Phase 1 (MVP, done)
 - Connection CRUD with secure password storage (Electron `safeStorage`)
-- Local MySQL + SSH tunnel (random local port, managed by `ssh-service`)
+- Local MySQL / PostgreSQL + SSH tunnel (random local port, managed by `ssh-service`)
 - DB / table tree, table search, table data with paging / where / sort
 - Row insert / edit / delete (PK-based), batch delete with confirmation
 - Table structure (columns / indexes / `CREATE TABLE`)
 - Schema diff between two databases (any two connections)
+- Row-level data diff with PK-based pairing and sample mismatches
 - Sync plan preview + execute with progress log + multiple existing-table strategies
+- Cross-engine data sync for workflows where the target schema already exists (for example Laravel `migrate` on PostgreSQL)
 
 ## Phase 2 (planned)
-- Row-level data diff with primary key based pairing
 - Foreign-key aware sync ordering
 - SQL editor tab (Monaco) and query result tab
 - Export (CSV / JSON / SQL dump) and import
@@ -56,3 +57,4 @@ npm run dist:win      # win nsis
 - Renderer cannot read decrypted secrets — only `hasPassword` flags are exposed.
 - All identifiers are whitelist-validated before being interpolated into SQL.
 - Destructive sync strategies require explicit user selection + a confirmation dialog.
+- Cross-engine structure sync is intentionally conservative. For MySQL -> PostgreSQL, create the target schema first (for example via Laravel migrations), then use row diff + data sync.

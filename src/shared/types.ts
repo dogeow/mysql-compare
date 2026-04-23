@@ -183,17 +183,45 @@ export interface IndexDiff {
   target?: IndexInfo
 }
 
+export interface TableDataDiffSample {
+  kind: DiffKind
+  key: string
+  source?: Record<string, unknown>
+  target?: Record<string, unknown>
+}
+
+export interface TableDataDiff {
+  comparable: boolean
+  reason?: string
+  keyColumns: string[]
+  compareColumns: string[]
+  sourceRowCount: number
+  targetRowCount: number
+  sourceOnly: number
+  targetOnly: number
+  modified: number
+  identical: number
+  samples: TableDataDiffSample[]
+}
+
 export interface TableDiff {
   table: string
   kind: DiffKind
   columnDiffs: ColumnDiff[]
   indexDiffs: IndexDiff[]
+  dataDiff?: TableDataDiff
+}
+
+export interface TableRowComparison {
+  table: string
+  dataDiff: TableDataDiff
 }
 
 export interface DatabaseDiff {
   sourceDatabase: string
   targetDatabase: string
   tableDiffs: TableDiff[]
+  rowComparisons: TableRowComparison[]
 }
 
 export interface DiffRequest {
@@ -201,6 +229,22 @@ export interface DiffRequest {
   sourceDatabase: string
   targetConnectionId: string
   targetDatabase: string
+  includeData?: boolean
+  tables?: string[]
+}
+
+export interface TableDiffRequest {
+  sourceConnectionId: string
+  sourceDatabase: string
+  targetConnectionId: string
+  targetDatabase: string
+  table: string
+  includeData?: boolean
+}
+
+export interface TableComparisonResult {
+  tableDiff: TableDiff | null
+  rowComparison: TableRowComparison | null
 }
 
 // ---------- Sync ----------

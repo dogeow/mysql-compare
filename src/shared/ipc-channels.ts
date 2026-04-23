@@ -24,6 +24,7 @@ export const IPC = {
 
   // Diff & Sync
   DiffDatabases: 'diff:databases',
+  DiffTable: 'diff:table',
   BuildSyncPlan: 'sync:buildPlan',
   ExecuteSync: 'sync:execute',
 

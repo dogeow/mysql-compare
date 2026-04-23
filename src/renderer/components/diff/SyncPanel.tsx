@@ -10,6 +10,7 @@ import { api, unwrap } from '@renderer/lib/api'
 import { useUIStore } from '@renderer/store/ui-store'
 import type {
   DatabaseDiff,
+  DbEngine,
   ExistingTableStrategy,
   SyncPlan,
   SyncProgressEvent,
@@ -22,15 +23,26 @@ interface Props {
   onClose: () => void
   source: { connectionId: string; database: string }
   target: { connectionId: string; database: string }
+  sourceEngine: DbEngine
+  targetEngine: DbEngine
   diff: DatabaseDiff
 }
 
-export function SyncPanel({ open, onClose, source, target, diff }: Props) {
+export function SyncPanel({
+  open,
+  onClose,
+  source,
+  target,
+  sourceEngine,
+  targetEngine,
+  diff
+}: Props) {
   const { showToast } = useUIStore()
   const candidateTables = useMemo(() => diff.tableDiffs.map((t) => t.table), [diff])
+  const crossEngine = sourceEngine !== targetEngine
 
   const [selected, setSelected] = useState<Set<string>>(new Set(candidateTables))
-  const [syncStructure, setSyncStructure] = useState(true)
+  const [syncStructure, setSyncStructure] = useState(!crossEngine)
   const [syncData, setSyncData] = useState(false)
   const [strategy, setStrategy] = useState<ExistingTableStrategy>('skip')
   const [plan, setPlan] = useState<SyncPlan | null>(null)
@@ -43,6 +55,17 @@ export function SyncPanel({ open, onClose, source, target, diff }: Props) {
     })
     return off
   }, [])
+
+  useEffect(() => {
+    if (!open) return
+    setSelected(new Set(candidateTables))
+    setSyncStructure(!crossEngine)
+    setSyncData(crossEngine)
+    setPlan(null)
+    if (crossEngine && strategy === 'overwrite-structure') {
+      setStrategy('append-data')
+    }
+  }, [candidateTables, crossEngine, open, strategy])
 
   function buildReq(dryRun: true): SyncRequest & { dryRun: true }
   function buildReq(dryRun: false): SyncRequest & { dryRun: false }
@@ -113,7 +136,11 @@ export function SyncPanel({ open, onClose, source, target, diff }: Props) {
         <div className="space-y-3">
           <div className="flex gap-3">
             <label className="flex items-center gap-2 text-sm">
-              <Checkbox checked={syncStructure} onChange={(e) => setSyncStructure(e.target.checked)} />
+              <Checkbox
+                checked={syncStructure}
+                disabled={crossEngine}
+                onChange={(e) => setSyncStructure(e.target.checked)}
+              />
               Structure
             </label>
             <label className="flex items-center gap-2 text-sm">
@@ -121,17 +148,30 @@ export function SyncPanel({ open, onClose, source, target, diff }: Props) {
               Data
             </label>
           </div>
+          {crossEngine && (
+            <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
+              Cross-engine sync detected: create the PostgreSQL schema first, then run data-only sync. This matches the Laravel migrate workflow.
+            </div>
+          )}
           <div>
             <Label>If table exists in target</Label>
             <Select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as ExistingTableStrategy)}
-              options={[
-                { value: 'skip', label: 'Skip' },
-                { value: 'overwrite-structure', label: 'Drop & Recreate (DESTRUCTIVE)' },
-                { value: 'append-data', label: 'Keep structure, append data' },
-                { value: 'truncate-and-import', label: 'Truncate & Import (DESTRUCTIVE)' }
-              ]}
+              options={
+                crossEngine
+                  ? [
+                      { value: 'skip', label: 'Skip' },
+                      { value: 'append-data', label: 'Keep structure, append data' },
+                      { value: 'truncate-and-import', label: 'Truncate & Import (DESTRUCTIVE)' }
+                    ]
+                  : [
+                      { value: 'skip', label: 'Skip' },
+                      { value: 'overwrite-structure', label: 'Drop & Recreate (DESTRUCTIVE)' },
+                      { value: 'append-data', label: 'Keep structure, append data' },
+                      { value: 'truncate-and-import', label: 'Truncate & Import (DESTRUCTIVE)' }
+                    ]
+              }
             />
             {(strategy === 'overwrite-structure' || strategy === 'truncate-and-import') && (
               <div className="mt-1 text-[11px] text-amber-400">

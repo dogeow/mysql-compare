@@ -19,6 +19,8 @@ import type {
   SyncPlan,
   SyncProgressEvent,
   SyncRequest,
+  TableComparisonResult,
+  TableDiffRequest,
   TableSchema,
   UpdateRowRequest
 } from '../shared/types'
@@ -54,7 +56,8 @@ const api = {
       invoke<TableSchema>(IPC.GetTableSchema, { connectionId, database, table })
   },
   diff: {
-    databases: (req: DiffRequest) => invoke<DatabaseDiff>(IPC.DiffDatabases, req)
+    databases: (req: DiffRequest) => invoke<DatabaseDiff>(IPC.DiffDatabases, req),
+    table: (req: TableDiffRequest) => invoke<TableComparisonResult>(IPC.DiffTable, req)
   },
   sync: {
     buildPlan: (req: SyncRequest) => invoke<SyncPlan>(IPC.BuildSyncPlan, req),

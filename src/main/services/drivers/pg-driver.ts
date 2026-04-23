@@ -101,11 +101,12 @@ export class PostgresDriver implements DbDriver {
       udt_name: string
       is_nullable: string
       column_default: string | null
+      is_identity: string
       character_maximum_length: number | null
       numeric_precision: number | null
       numeric_scale: number | null
     }>(
-      `SELECT column_name, data_type, udt_name, is_nullable, column_default,
+      `SELECT column_name, data_type, udt_name, is_nullable, column_default, is_identity,
               character_maximum_length, numeric_precision, numeric_scale
        FROM information_schema.columns
        WHERE table_schema = $1 AND table_name = $2
@@ -137,9 +138,10 @@ export class PostgresDriver implements DbDriver {
       const isPk = pkSet.has(r.column_name)
       const isUnique = uniqueSet.has(r.column_name)
       const isAutoInc =
-        typeof r.column_default === 'string' &&
-        (r.column_default.startsWith('nextval(') ||
-          r.column_default.toLowerCase().includes('identity'))
+        r.is_identity === 'YES' ||
+        (typeof r.column_default === 'string' &&
+          (r.column_default.startsWith('nextval(') ||
+            r.column_default.toLowerCase().includes('identity')))
       return {
         name: r.column_name,
         type: formatPgType(r),

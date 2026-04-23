@@ -6,6 +6,14 @@ let toastTimer: ReturnType<typeof setTimeout> | null = null
 export type RightView =
   | { kind: 'empty' }
   | { kind: 'table'; connectionId: string; database: string; table: string }
+  | {
+      kind: 'table-compare'
+      sourceConnectionId: string
+      sourceDatabase: string
+      targetConnectionId: string
+      targetDatabase: string
+      table: string
+    }
   | { kind: 'sql'; connectionId: string; connectionName?: string; database: string }
   | { kind: 'diff' }
 
@@ -35,6 +43,9 @@ type ActiveState = Pick<UIState, 'activeTabId' | 'rightView'>
 function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
+  if (view.kind === 'table-compare') {
+    return `table-compare:${view.sourceConnectionId}:${view.sourceDatabase}:${view.targetConnectionId}:${view.targetDatabase}:${view.table}`
+  }
   return `table:${view.connectionId}:${view.database}:${view.table}`
 }
 
@@ -45,6 +56,7 @@ function getTabTitle(view: WorkspaceView): string {
       ? `SQL · ${view.database} @ ${view.connectionName}`
       : `SQL · ${view.database}`
   }
+  if (view.kind === 'table-compare') return `Compare · ${view.table}`
   return view.table
 }
 
