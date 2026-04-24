@@ -430,16 +430,17 @@ export function DiffPanel() {
           <div className="border-t border-border/40 bg-card/10 px-4 py-3">
             <div className="rounded-xl bg-background/25 p-4">
               <div className="grid grid-cols-1 gap-x-4 gap-y-3 md:grid-cols-2 xl:grid-cols-4">
-                <div className="space-y-1 md:col-span-2 xl:col-span-2">
-                  <div className="flex items-baseline gap-3">
+                <div className="space-y-0.5 md:col-span-2 xl:col-span-2">
+                  <div className="flex min-h-[20px] items-baseline gap-3">
                     <h3 className="shrink-0 text-sm font-semibold">Source</h3>
                     <span className="min-w-0 truncate text-[11px] text-muted-foreground">
                       {formatEndpointSelectionSummary(selectedSourceConnection?.name, srcDb, 'Choose source')}
                     </span>
                   </div>
                 </div>
-                <div className="space-y-1 md:col-span-2 xl:col-span-2">
-                  <div className="flex items-baseline gap-3">
+
+                <div className="space-y-0.5 md:col-span-2 xl:col-span-2">
+                  <div className="flex min-h-[20px] items-baseline gap-3">
                     <h3 className="shrink-0 text-sm font-semibold">Target</h3>
                     <span className="min-w-0 truncate text-[11px] text-muted-foreground">
                       {formatEndpointSelectionSummary(selectedTargetConnection?.name, tgtDb, 'Choose target')}
@@ -448,7 +449,9 @@ export function DiffPanel() {
                 </div>
 
                 <div className="min-w-0 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">Connection</Label>
+                  <div className="flex min-h-[16px] items-center gap-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Connection</Label>
+                  </div>
                   <Select options={connOptions} value={srcId} onChange={(e) => setSrcId(e.target.value)} />
                 </div>
                 <div className="min-w-0 space-y-1.5">
@@ -469,7 +472,9 @@ export function DiffPanel() {
                   />
                 </div>
                 <div className="min-w-0 space-y-1.5">
-                  <Label className="text-[11px] text-muted-foreground">Connection</Label>
+                  <div className="flex min-h-[16px] items-center gap-1.5">
+                    <Label className="text-[11px] text-muted-foreground">Connection</Label>
+                  </div>
                   <Select options={connOptions} value={tgtId} onChange={(e) => setTgtId(e.target.value)} />
                 </div>
                 <div className="min-w-0 space-y-1.5">
