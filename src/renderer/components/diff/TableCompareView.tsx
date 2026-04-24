@@ -9,14 +9,18 @@ import { cn, formatCellValue } from '@renderer/lib/utils'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import type { ColumnInfo, QueryRowsResult } from '../../../shared/types'
+import { getRowDiffNavigation } from './diff-panel-utils'
 import { buildCopyValues, buildRowKey } from './table-compare-utils'
 
 interface Props {
+  compareSessionId: string
   sourceConnectionId: string
   sourceDatabase: string
   targetConnectionId: string
   targetDatabase: string
   table: string
+  comparedTables: string[]
+  diffTables: string[]
 }
 
 interface ComparedTableDataState {
@@ -28,14 +32,17 @@ interface ComparedTableDataState {
 const PAGE_SIZE = 100
 
 export function TableCompareView({
+  compareSessionId,
   sourceConnectionId,
   sourceDatabase,
   targetConnectionId,
   targetDatabase,
-  table
+  table,
+  comparedTables,
+  diffTables
 }: Props) {
   const { connections } = useConnectionStore()
-  const { showToast } = useUIStore()
+  const { setRightView, showToast } = useUIStore()
   const [page, setPage] = useState(1)
   const [sourceReloadToken, setSourceReloadToken] = useState(0)
   const [targetReloadToken, setTargetReloadToken] = useState(0)
@@ -70,6 +77,16 @@ export function TableCompareView({
   useEffect(() => {
     setPage(1)
     setSelectedSourceRows({})
+    setSourceState({
+      data: null,
+      error: null,
+      loading: true
+    })
+    setTargetState({
+      data: null,
+      error: null,
+      loading: true
+    })
   }, [sourceConnectionId, sourceDatabase, targetConnectionId, targetDatabase, table])
 
   useEffect(() => {
@@ -121,6 +138,7 @@ export function TableCompareView({
       .map((row) => buildRowKey(row, sourceKeyColumns))
       .filter((key): key is string => key !== null)
   }, [sourceKeyColumns, sourceSelectionEnabled, sourceState.data])
+  const visibleSourceKeySet = useMemo(() => new Set(visibleSourceKeys), [visibleSourceKeys])
   const allVisibleSelected =
     visibleSourceKeys.length > 0 && visibleSourceKeys.every((key) => selectedKeySet.has(key))
   const totalPages = useMemo(() => {
@@ -128,10 +146,28 @@ export function TableCompareView({
     const targetPages = targetState.data ? Math.max(1, Math.ceil(targetState.data.total / PAGE_SIZE)) : 1
     return Math.max(sourcePages, targetPages)
   }, [sourceState.data, targetState.data])
+  const rowDiffNavigation = useMemo(
+    () => getRowDiffNavigation(comparedTables, diffTables, table),
+    [comparedTables, diffTables, table]
+  )
 
   const refreshBoth = () => {
     setSourceReloadToken((current) => current + 1)
     setTargetReloadToken((current) => current + 1)
+  }
+
+  const navigateToTable = (nextTable: string) => {
+    setRightView({
+      kind: 'table-compare',
+      compareSessionId,
+      sourceConnectionId,
+      sourceDatabase,
+      targetConnectionId,
+      targetDatabase,
+      table: nextTable,
+      comparedTables,
+      diffTables
+    })
   }
 
   const toggleSourceRow = (row: Record<string, unknown>) => {
@@ -159,18 +195,16 @@ export function TableCompareView({
     setSelectedSourceRows((current) => {
       if (allVisibleSelected) {
         return Object.fromEntries(
-          Object.entries(current).filter(([rowKey]) => !visibleSourceKeys.includes(rowKey))
+          Object.entries(current).filter(([rowKey]) => !visibleSourceKeySet.has(rowKey))
         )
       }
 
-      return sourceData.rows.reduce<Record<string, Record<string, unknown>>>((next, row) => {
+      const next = { ...current }
+      for (const row of sourceData.rows) {
         const rowKey = buildRowKey(row, sourceKeyColumns)
-        if (!rowKey) return next
-        return {
-          ...next,
-          [rowKey]: row
-        }
-      }, current)
+        if (rowKey) next[rowKey] = row
+      }
+      return next
     })
   }
 
@@ -302,21 +336,50 @@ export function TableCompareView({
               ? `Both sides are ordered by ${stableOrderColumn} for page-by-page inspection, and source selection is tracked by primary key.`
               : 'This view shows the same page from each table. If the tables do not share a primary key column, rows may not line up one-to-one.'}
           </span>
-          <div className="flex items-center gap-2">
-            <span>
-              Page {page} / {totalPages}
-            </span>
-            <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              Prev
-            </Button>
-            <Button
-              size="sm"
-              variant="outline"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              Next
-            </Button>
+          <div className="flex flex-wrap items-center gap-3">
+            {rowDiffNavigation.totalDiffTables > 0 && (
+              <div className="flex items-center gap-2">
+                <span>
+                  {rowDiffNavigation.currentDiffPosition === null
+                    ? `${rowDiffNavigation.totalDiffTables} changed table(s)`
+                    : `Diff table ${rowDiffNavigation.currentDiffPosition} / ${rowDiffNavigation.totalDiffTables}`}
+                </span>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!rowDiffNavigation.previousTable}
+                  onClick={() =>
+                    rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
+                  }
+                >
+                  Prev diff
+                </Button>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  disabled={!rowDiffNavigation.nextTable}
+                  onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
+                >
+                  Next diff
+                </Button>
+              </div>
+            )}
+            <div className="flex items-center gap-2">
+              <span>
+                Page {page} / {totalPages}
+              </span>
+              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+                Prev
+              </Button>
+              <Button
+                size="sm"
+                variant="outline"
+                disabled={page >= totalPages}
+                onClick={() => setPage(page + 1)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </div>
         {sourceState.data && !sourceState.data.hasPrimaryKey && (

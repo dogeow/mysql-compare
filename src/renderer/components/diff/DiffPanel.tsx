@@ -22,6 +22,7 @@ import {
   buildDatabaseDiff,
   buildInitialComparisonEntries,
   DIFF_PANEL_PREFERENCES_KEY,
+  filterChangedRowComparisons,
   filterComparisonEntries,
   getPreferredComparisonTable,
   hasSchemaOrPresenceDiff,
@@ -62,10 +63,8 @@ export function DiffPanel() {
   const [tgtId, setTgtId] = useState('')
   const [srcDb, setSrcDb] = useState('')
   const [tgtDb, setTgtDb] = useState('')
-  const [srcDbs, setSrcDbs] = useState<string[]>([])
-  const [tgtDbs, setTgtDbs] = useState<string[]>([])
-  const [srcDbsLoading, setSrcDbsLoading] = useState(false)
-  const [tgtDbsLoading, setTgtDbsLoading] = useState(false)
+  const { databases: srcDbs, loading: srcDbsLoading } = useDatabaseList(srcId)
+  const { databases: tgtDbs, loading: tgtDbsLoading } = useDatabaseList(tgtId)
   const [comparePhase, setComparePhase] = useState<ComparePhase>('idle')
   const [compareContext, setCompareContext] = useState<CompareContext | null>(null)
   const [sourceTables, setSourceTables] = useState<string[]>([])
@@ -73,6 +72,7 @@ export function DiffPanel() {
   const [comparisonEntries, setComparisonEntries] = useState<TableCompareEntry[]>([])
   const [selectedComparisonTable, setSelectedComparisonTable] = useState<string | null>(null)
   const [showSync, setShowSync] = useState(false)
+  const [showAllRowComparisons, setShowAllRowComparisons] = useState(false)
   const [compareData, setCompareData] = useState(true)
   const [preferences, setPreferences] = useState<DiffPanelPreferences>(() =>
     loadStoredDiffPanelPreferences()
@@ -93,66 +93,12 @@ export function DiffPanel() {
   }, [refresh])
 
   useEffect(() => {
-    let active = true
     setSrcDb('')
-    setSrcDbs([])
-    if (!srcId) {
-      setSrcDbsLoading(false)
-      return () => {
-        active = false
-      }
-    }
-
-    setSrcDbsLoading(true)
-    void unwrap(api.db.listDatabases(srcId))
-      .then((databases) => {
-        if (!active) return
-        setSrcDbs(databases)
-      })
-      .catch((err) => {
-        if (!active) return
-        showToast((err as Error).message, 'error')
-      })
-      .finally(() => {
-        if (!active) return
-        setSrcDbsLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [showToast, srcId])
+  }, [srcId])
 
   useEffect(() => {
-    let active = true
     setTgtDb('')
-    setTgtDbs([])
-    if (!tgtId) {
-      setTgtDbsLoading(false)
-      return () => {
-        active = false
-      }
-    }
-
-    setTgtDbsLoading(true)
-    void unwrap(api.db.listDatabases(tgtId))
-      .then((databases) => {
-        if (!active) return
-        setTgtDbs(databases)
-      })
-      .catch((err) => {
-        if (!active) return
-        showToast((err as Error).message, 'error')
-      })
-      .finally(() => {
-        if (!active) return
-        setTgtDbsLoading(false)
-      })
-
-    return () => {
-      active = false
-    }
-  }, [showToast, tgtId])
+  }, [tgtId])
 
   useEffect(() => {
     persistDiffPanelPreferences(preferences)
@@ -180,6 +126,7 @@ export function DiffPanel() {
     }
 
     setShowSync(false)
+    setShowAllRowComparisons(false)
     setSelectedComparisonTable(null)
     setPreferences((current) => ({
       ...current,
@@ -317,8 +264,11 @@ export function DiffPanel() {
     () => prioritizeComparisonEntries(filteredComparisonEntries),
     [filteredComparisonEntries]
   )
-  const hasCompareErrors = comparisonEntries.some((entry) => entry.status === 'error')
-  const compareErrorCount = comparisonEntries.filter((entry) => entry.status === 'error').length
+  const compareErrorCount = comparisonEntries.reduce(
+    (count, entry) => (entry.status === 'error' ? count + 1 : count),
+    0
+  )
+  const hasCompareErrors = compareErrorCount > 0
   const fullyIdentical = diff
     ? comparePhase === 'done' &&
       !hasCompareErrors &&
@@ -328,22 +278,35 @@ export function DiffPanel() {
   const hasSkippedRowComparison = diff?.rowComparisons.some(
     ({ dataDiff }) => !dataDiff.comparable
   ) ?? false
-  const sharedTableCount = comparisonEntries.filter(
-    (entry) => entry.sourceExists && entry.targetExists
-  ).length
-  const completedSharedTableCount = comparisonEntries.filter(
-    (entry) => entry.sourceExists && entry.targetExists && (entry.status === 'done' || entry.status === 'error')
-  ).length
+  const sharedTableStats = useMemo(() => {
+    let sharedTotal = 0
+    let completed = 0
+    let pending: string | undefined
+    for (const entry of comparisonEntries) {
+      if (!entry.sourceExists || !entry.targetExists) continue
+      sharedTotal += 1
+      if (entry.status === 'done' || entry.status === 'error') {
+        completed += 1
+      } else if (!pending) {
+        pending = entry.table
+      }
+    }
+    return { sharedTotal, completed, pending }
+  }, [comparisonEntries])
+  const sharedTableCount = sharedTableStats.sharedTotal
+  const completedSharedTableCount = sharedTableStats.completed
+  const pendingSharedTable = sharedTableStats.pending
   const hasRowComparisonResults = compareData && !!diff && diff.rowComparisons.length > 0
-  const rowChangedTableCount = diff
-    ? diff.rowComparisons.filter(
-        (rowComparison) =>
-          rowComparison.dataDiff.comparable && !hasNoRowDifferences(rowComparison)
-      ).length
-    : 0
+  const changedRowComparisons = useMemo(
+    () => (diff ? filterChangedRowComparisons(diff.rowComparisons) : []),
+    [diff]
+  )
+  const rowChangedTableCount = changedRowComparisons.length
   const rowSkippedTableCount = diff
     ? diff.rowComparisons.filter((rowComparison) => !rowComparison.dataDiff.comparable).length
     : 0
+  const rowComparisonTables = diff?.rowComparisons.map((rowComparison) => rowComparison.table) ?? []
+  const rowDiffTables = changedRowComparisons.map((rowComparison) => rowComparison.table)
   const compareSetupSummary = formatCompareSetupSummary({
     sourceConnectionName: selectedSourceConnection?.name,
     sourceDatabase: srcDb,
@@ -415,11 +378,14 @@ export function DiffPanel() {
 
     setRightView({
       kind: 'table-compare',
+      compareSessionId: `${compareContext.sourceConnectionId}:${compareContext.sourceDatabase}:${compareContext.targetConnectionId}:${compareContext.targetDatabase}:${table}`,
       sourceConnectionId: compareContext.sourceConnectionId,
       sourceDatabase: compareContext.sourceDatabase,
       targetConnectionId: compareContext.targetConnectionId,
       targetDatabase: compareContext.targetDatabase,
-      table
+      table,
+      comparedTables: rowComparisonTables,
+      diffTables: rowDiffTables
     })
   }
 
@@ -695,7 +661,14 @@ export function DiffPanel() {
                       <div className="space-y-3">
                         <div className="flex items-center gap-2 text-xs text-muted-foreground">
                           <ComparePhaseIcon phase={comparePhase} />
-                          <span>{formatComparePhase(comparePhase, completedSharedTableCount, sharedTableCount)}</span>
+                          <span>
+                            {formatComparePhase(
+                              comparePhase,
+                              completedSharedTableCount,
+                              sharedTableCount,
+                              pendingSharedTable
+                            )}
+                          </span>
                         </div>
                         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                           <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
@@ -835,6 +808,8 @@ export function DiffPanel() {
                 ) : hasRowComparisonResults && diff ? (
                   <RowComparisonSection
                     rowComparisons={diff.rowComparisons}
+                    showAll={showAllRowComparisons}
+                    onToggleShowAll={() => setShowAllRowComparisons((current) => !current)}
                     onOpenCompare={openCompareView}
                     onOpenSource={(table) => openComparedTable('source', table)}
                     onOpenTarget={(table) => openComparedTable('target', table)}
@@ -889,11 +864,13 @@ export function DiffPanel() {
 function formatComparePhase(
   phase: ComparePhase,
   completedSharedTableCount: number,
-  sharedTableCount: number
+  sharedTableCount: number,
+  pendingSharedTable?: string
 ): string {
   if (phase === 'loading-tables') return 'Loading source and target table lists...'
   if (phase === 'comparing') {
-    return `Comparing ${completedSharedTableCount}/${sharedTableCount} shared table(s)...`
+    const base = `Comparing ${completedSharedTableCount}/${sharedTableCount} shared table(s)...`
+    return pendingSharedTable ? `${base} Pending: ${pendingSharedTable}` : base
   }
   if (phase === 'done') {
     return sharedTableCount === 0
@@ -1007,6 +984,39 @@ function EmptyResultState({ title, description }: { title: string; description: 
   )
 }
 
+function useDatabaseList(connectionId: string): { databases: string[]; loading: boolean } {
+  const showToast = useUIStore((state) => state.showToast)
+  const [databases, setDatabases] = useState<string[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    setDatabases([])
+    if (!connectionId) {
+      setLoading(false)
+      return
+    }
+
+    let active = true
+    setLoading(true)
+    void unwrap(api.db.listDatabases(connectionId))
+      .then((list) => {
+        if (active) setDatabases(list)
+      })
+      .catch((err) => {
+        if (active) showToast((err as Error).message, 'error')
+      })
+      .finally(() => {
+        if (active) setLoading(false)
+      })
+
+    return () => {
+      active = false
+    }
+  }, [connectionId, showToast])
+
+  return { databases, loading }
+}
+
 function loadStoredDiffPanelPreferences(): DiffPanelPreferences {
   if (typeof window === 'undefined') return parseDiffPanelPreferences(null)
 
@@ -1064,23 +1074,45 @@ function TableOpenActions({
 
 function RowComparisonSection({
   rowComparisons,
+  showAll,
+  onToggleShowAll,
   onOpenCompare,
   onOpenSource,
   onOpenTarget
 }: {
   rowComparisons: TableRowComparison[]
+  showAll: boolean
+  onToggleShowAll: () => void
   onOpenCompare: (table: string) => void
   onOpenSource: (table: string) => void
   onOpenTarget: (table: string) => void
 }) {
+  const changedRowComparisons = filterChangedRowComparisons(rowComparisons)
+  const visibleRowComparisons = showAll ? rowComparisons : changedRowComparisons
+  const hiddenTableCount = rowComparisons.length - changedRowComparisons.length
+
   return (
     <div className="rounded-xl bg-card/15">
       <div className="flex items-center gap-2 px-3 py-2">
         <strong className="text-sm">Row comparison</strong>
         <Badge>{rowComparisons.length} table(s)</Badge>
+        {hiddenTableCount > 0 && (
+          <Button
+            size="sm"
+            variant="ghost"
+            className="ml-auto h-7 px-2 text-[11px]"
+            onClick={onToggleShowAll}
+          >
+            {showAll ? 'Only different' : 'Show all'}
+          </Button>
+        )}
       </div>
       <div className="divide-y divide-border/30 border-t border-border/30">
-        {rowComparisons.map((rowComparison) => (
+        {visibleRowComparisons.length === 0 ? (
+          <div className="px-3 py-6 text-xs text-muted-foreground">
+            No row differences found. Click Show all to inspect identical or skipped comparisons.
+          </div>
+        ) : visibleRowComparisons.map((rowComparison) => (
           <div key={rowComparison.table} className="px-3 py-3">
             <div className="flex items-center gap-2">
               <strong className="text-sm">{rowComparison.table}</strong>
@@ -1155,7 +1187,6 @@ function DataDiffSection({ dataDiff }: { dataDiff: TableDataDiff }) {
   return (
     <div className="mt-3 border-l border-border/40 pl-4 text-xs">
       <div className="space-y-1 rounded-md bg-background/40 px-3 py-2">
-        <div className="text-[11px] font-medium uppercase tracking-wide text-muted-foreground">Row diff</div>
         {!dataDiff.comparable ? (
           <div className="text-amber-400">{dataDiff.reason || 'Row comparison skipped'}</div>
         ) : (

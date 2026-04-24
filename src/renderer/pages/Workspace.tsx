@@ -119,11 +119,14 @@ export function Workspace() {
                 <DiffPanel />
               ) : tab.view.kind === 'table-compare' ? (
                 <TableCompareView
+                  compareSessionId={tab.view.compareSessionId}
                   sourceConnectionId={tab.view.sourceConnectionId}
                   sourceDatabase={tab.view.sourceDatabase}
                   targetConnectionId={tab.view.targetConnectionId}
                   targetDatabase={tab.view.targetDatabase}
                   table={tab.view.table}
+                  comparedTables={tab.view.comparedTables}
+                  diffTables={tab.view.diffTables}
                 />
               ) : tab.view.kind === 'sql' ? (
                 <SQLQueryView

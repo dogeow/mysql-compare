@@ -7,8 +7,10 @@ import {
   DEFAULT_SOURCE_TABLES_EXPANDED,
   DEFAULT_TABLE_SEARCH_QUERY,
   DEFAULT_TARGET_TABLES_EXPANDED,
+  filterChangedRowComparisons,
   filterComparisonEntries,
   getPreferredComparisonTable,
+  getRowDiffNavigation,
   parseDiffPanelPreferences,
   parseTableCompareConcurrency,
   prioritizeComparisonEntries
@@ -150,6 +152,16 @@ describe('diff-panel-utils', () => {
     ])
   })
 
+  it('returns only comparable row comparisons with actual differences', () => {
+    expect(
+      filterChangedRowComparisons(
+        entries
+          .map((entry) => entry.rowComparison)
+          .filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+      ).map((entry) => entry.table)
+    ).toEqual(['row_changed_table'])
+  })
+
   it('filters entries by table name after the status filter is applied', () => {
     expect(filterComparisonEntries(entries, 'changed', 'row_').map((entry) => entry.table)).toEqual([
       'row_changed_table'
@@ -160,40 +172,46 @@ describe('diff-panel-utils', () => {
     ])
   })
 
-  it('moves failed comparison entries to the top while preserving other entry order', () => {
+  it('moves unfinished comparison entries to the top while preserving order within each priority', () => {
     expect(prioritizeComparisonEntries([
-      entries[0]!,
       {
         ...entries[1]!,
         table: 'failed_table',
         status: 'error',
         error: 'boom'
       },
-      entries[2]!
+      entries[2]!,
+      entries[0]!,
+      {
+        ...entries[3]!,
+        table: 'queued_table',
+        status: 'queued'
+      }
     ]).map((entry) => entry.table)).toEqual([
-      'failed_table',
       'comparing_table',
+      'queued_table',
+      'failed_table',
       'row_changed_table'
     ])
   })
 
-  it('prefers the first failed entry and otherwise falls back to the current or first entry', () => {
+  it('prefers the first unfinished entry and otherwise falls back to the current or first entry', () => {
     const prioritizedEntries = prioritizeComparisonEntries([
-      entries[0]!,
       {
         ...entries[1]!,
         table: 'failed_table',
         status: 'error',
         error: 'boom'
       },
+      entries[0]!,
       entries[2]!
     ])
 
-    expect(getPreferredComparisonTable(prioritizedEntries, null)).toBe('failed_table')
+    expect(getPreferredComparisonTable(prioritizedEntries, null)).toBe('comparing_table')
     expect(getPreferredComparisonTable(prioritizedEntries, 'row_changed_table')).toBe(
       'row_changed_table'
     )
-    expect(getPreferredComparisonTable(prioritizedEntries, 'missing')).toBe('failed_table')
+    expect(getPreferredComparisonTable(prioritizedEntries, 'missing')).toBe('comparing_table')
     expect(getPreferredComparisonTable([], null)).toBeNull()
   })
 
@@ -201,6 +219,34 @@ describe('diff-panel-utils', () => {
     expect(parseTableCompareConcurrency('5')).toBe(5)
     expect(parseTableCompareConcurrency('invalid')).toBe(DEFAULT_TABLE_COMPARE_CONCURRENCY)
     expect(parseTableCompareConcurrency('0')).toBe(DEFAULT_TABLE_COMPARE_CONCURRENCY)
+  })
+
+  it('resolves previous and next changed tables from the current table context', () => {
+    expect(
+      getRowDiffNavigation(
+        ['activity_log', 'cache', 'chat_moderation_actions', 'users'],
+        ['cache', 'users'],
+        'cache'
+      )
+    ).toEqual({
+      previousTable: null,
+      nextTable: 'users',
+      currentDiffPosition: 1,
+      totalDiffTables: 2
+    })
+
+    expect(
+      getRowDiffNavigation(
+        ['activity_log', 'cache', 'chat_moderation_actions', 'users'],
+        ['cache', 'users'],
+        'chat_moderation_actions'
+      )
+    ).toEqual({
+      previousTable: 'cache',
+      nextTable: 'users',
+      currentDiffPosition: null,
+      totalDiffTables: 2
+    })
   })
 
   it('restores the new status result tab from persisted preferences', () => {

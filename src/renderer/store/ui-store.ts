@@ -8,11 +8,14 @@ export type RightView =
   | { kind: 'table'; connectionId: string; database: string; table: string }
   | {
       kind: 'table-compare'
+      compareSessionId: string
       sourceConnectionId: string
       sourceDatabase: string
       targetConnectionId: string
       targetDatabase: string
       table: string
+      comparedTables: string[]
+      diffTables: string[]
     }
   | { kind: 'sql'; connectionId: string; connectionName?: string; database: string }
   | { kind: 'diff' }
@@ -58,7 +61,7 @@ function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
   if (view.kind === 'table-compare') {
-    return `table-compare:${view.sourceConnectionId}:${view.sourceDatabase}:${view.targetConnectionId}:${view.targetDatabase}:${view.table}`
+    return `table-compare:${view.compareSessionId}`
   }
   return `table:${view.connectionId}:${view.database}:${view.table}`
 }
@@ -109,12 +112,7 @@ export const useUIStore = create<UIState>((set) => ({
       const tabId = getTabId(view)
       const existing = state.workspaceTabs.find((tab) => tab.id === tabId)
       const workspaceTabs = existing
-        ? state.workspaceTabs.map((tab) => {
-            if (tab.id !== tabId) return tab
-            if (tab.view.kind !== 'sql' || view.kind !== 'sql') return tab
-            if (tab.view.connectionName === view.connectionName) return tab
-            return createTab(view)
-          })
+        ? state.workspaceTabs.map((tab) => (tab.id === tabId ? createTab(view) : tab))
         : [...state.workspaceTabs, createTab(view)]
       const nextTab = workspaceTabs.find((tab) => tab.id === tabId) ?? createTab(view)
       return {

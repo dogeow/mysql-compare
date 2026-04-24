@@ -132,34 +132,120 @@ export function hasNoRowDifferences({ dataDiff }: TableRowComparison): boolean {
   )
 }
 
+export function filterChangedRowComparisons(
+  rowComparisons: TableRowComparison[]
+): TableRowComparison[] {
+  return rowComparisons.filter(
+    (rowComparison) => rowComparison.dataDiff.comparable && !hasNoRowDifferences(rowComparison)
+  )
+}
+
+export function getRowDiffNavigation(
+  comparedTables: string[],
+  diffTables: string[],
+  currentTable: string
+): {
+  previousTable: string | null
+  nextTable: string | null
+  currentDiffPosition: number | null
+  totalDiffTables: number
+} {
+  const orderedComparedTables = Array.from(new Set(comparedTables))
+  const fallbackDiffTables = Array.from(new Set(diffTables))
+  const diffSet = new Set(fallbackDiffTables)
+  const orderedDiffTables =
+    orderedComparedTables.length > 0
+      ? orderedComparedTables.filter((table) => diffSet.has(table))
+      : fallbackDiffTables
+
+  if (orderedDiffTables.length === 0) {
+    return {
+      previousTable: null,
+      nextTable: null,
+      currentDiffPosition: null,
+      totalDiffTables: 0
+    }
+  }
+
+  const currentDiffIndex = orderedDiffTables.indexOf(currentTable)
+  if (currentDiffIndex >= 0) {
+    return {
+      previousTable: orderedDiffTables[currentDiffIndex - 1] ?? null,
+      nextTable: orderedDiffTables[currentDiffIndex + 1] ?? null,
+      currentDiffPosition: currentDiffIndex + 1,
+      totalDiffTables: orderedDiffTables.length
+    }
+  }
+
+  const currentComparedIndex = orderedComparedTables.indexOf(currentTable)
+  if (currentComparedIndex < 0) {
+    return {
+      previousTable: null,
+      nextTable: orderedDiffTables[0] ?? null,
+      currentDiffPosition: null,
+      totalDiffTables: orderedDiffTables.length
+    }
+  }
+
+  let previousTable: string | null = null
+  let nextTable: string | null = null
+
+  for (const table of orderedDiffTables) {
+    const diffTableIndex = orderedComparedTables.indexOf(table)
+    if (diffTableIndex < currentComparedIndex) {
+      previousTable = table
+      continue
+    }
+    if (diffTableIndex > currentComparedIndex) {
+      nextTable = table
+      break
+    }
+  }
+
+  return {
+    previousTable,
+    nextTable,
+    currentDiffPosition: null,
+    totalDiffTables: orderedDiffTables.length
+  }
+}
+
 export function filterComparisonEntries(
   entries: TableCompareEntry[],
   filter: TableStatusFilter,
   searchQuery = ''
 ): TableCompareEntry[] {
+  const filteredByStatus = applyStatusFilter(entries, filter)
   const normalizedQuery = searchQuery.trim().toLowerCase()
-  const filteredByStatus =
-    filter === 'all'
-      ? entries
-      : filter === 'comparing'
-        ? entries.filter((entry) => entry.status === 'comparing')
-        : filter === 'schema-changed'
-          ? entries.filter(hasSchemaChangedEntry)
-          : filter === 'row-changed'
-            ? entries.filter(hasRowChangedEntry)
-            : entries.filter(hasChangedEntry)
-
   if (!normalizedQuery) return filteredByStatus
 
   return filteredByStatus.filter((entry) => entry.table.toLowerCase().includes(normalizedQuery))
+}
+
+function applyStatusFilter(
+  entries: TableCompareEntry[],
+  filter: TableStatusFilter
+): TableCompareEntry[] {
+  switch (filter) {
+    case 'all':
+      return entries
+    case 'comparing':
+      return entries.filter((entry) => entry.status === 'comparing')
+    case 'schema-changed':
+      return entries.filter(hasSchemaChangedEntry)
+    case 'row-changed':
+      return entries.filter(hasRowChangedEntry)
+    case 'changed':
+      return entries.filter(hasChangedEntry)
+  }
 }
 
 export function prioritizeComparisonEntries(entries: TableCompareEntry[]): TableCompareEntry[] {
   return entries
     .map((entry, index) => ({ entry, index }))
     .sort((left, right) => {
-      const leftPriority = left.entry.status === 'error' ? 0 : 1
-      const rightPriority = right.entry.status === 'error' ? 0 : 1
+      const leftPriority = getComparisonEntryPriority(left.entry)
+      const rightPriority = getComparisonEntryPriority(right.entry)
       if (leftPriority !== rightPriority) {
         return leftPriority - rightPriority
       }
@@ -176,7 +262,13 @@ export function getPreferredComparisonTable(
     return currentTable
   }
 
-  return entries.find((entry) => entry.status === 'error')?.table ?? entries[0]?.table ?? null
+  return (
+    entries.find((entry) => entry.status === 'comparing')?.table ??
+    entries.find((entry) => entry.status === 'queued')?.table ??
+    entries.find((entry) => entry.status === 'error')?.table ??
+    entries[0]?.table ??
+    null
+  )
 }
 
 export function parseTableCompareConcurrency(value: string): number {
@@ -189,17 +281,7 @@ export function parseTableCompareConcurrency(value: string): number {
 }
 
 export function parseDiffPanelPreferences(raw: string | null | undefined): DiffPanelPreferences {
-  if (!raw) {
-    return {
-      statusFilter: DEFAULT_TABLE_STATUS_FILTER,
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
-      resultTab: DEFAULT_DIFF_RESULT_TAB,
-      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
-    }
-  }
+  if (!raw) return createDefaultDiffPanelPreferences()
 
   try {
     const parsed = JSON.parse(raw) as {
@@ -214,7 +296,9 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
 
     return {
       statusFilter: parseTableStatusFilter(parsed.statusFilter),
-      tableCompareConcurrency: parseTableCompareConcurrency(String(parsed.tableCompareConcurrency ?? '')),
+      tableCompareConcurrency: parseTableCompareConcurrency(
+        String(parsed.tableCompareConcurrency ?? '')
+      ),
       resultTab: parseDiffResultTab(parsed.resultTab),
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
       sourceTablesExpanded: parseBooleanPreference(
@@ -228,15 +312,19 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
       tableSearchQuery: parseStringPreference(parsed.tableSearchQuery, DEFAULT_TABLE_SEARCH_QUERY)
     }
   } catch {
-    return {
-      statusFilter: DEFAULT_TABLE_STATUS_FILTER,
-      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
-      resultTab: DEFAULT_DIFF_RESULT_TAB,
-      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
-    }
+    return createDefaultDiffPanelPreferences()
+  }
+}
+
+function createDefaultDiffPanelPreferences(): DiffPanelPreferences {
+  return {
+    statusFilter: DEFAULT_TABLE_STATUS_FILTER,
+    tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+    resultTab: DEFAULT_DIFF_RESULT_TAB,
+    setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+    sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
+    targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+    tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
   }
 }
 
@@ -261,6 +349,13 @@ function hasSchemaChangedEntry(entry: TableCompareEntry): boolean {
 function hasRowChangedEntry(entry: TableCompareEntry): boolean {
   if (!entry.rowComparison?.dataDiff.comparable) return false
   return !hasNoRowDifferences(entry.rowComparison)
+}
+
+function getComparisonEntryPriority(entry: TableCompareEntry): number {
+  if (entry.status === 'comparing') return 0
+  if (entry.status === 'queued') return 1
+  if (entry.status === 'error') return 2
+  return 3
 }
 
 function parseTableStatusFilter(value: unknown): TableStatusFilter {
