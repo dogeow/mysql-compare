@@ -1,10 +1,5 @@
 // 数据库对比面板：先加载两边表列表，再逐表对比并渐进展示结果。
 import { useEffect, useMemo, useState } from 'react'
-import { Button } from '@renderer/components/ui/button'
-import { Checkbox } from '@renderer/components/ui/checkbox'
-import { Select } from '@renderer/components/ui/select'
-import { Badge } from '@renderer/components/ui/badge'
-import { Tabs } from '@renderer/components/ui/tabs'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import type { DatabaseDiff } from '../../../shared/types'
@@ -30,7 +25,15 @@ import { EmptyResultState } from './diff-panel-presentation'
 import { RowComparisonSection } from './RowComparisonSection'
 import { SyncPanel } from './SyncPanel'
 import { SchemaTabContent, StatusTabContent, TablesTabContent } from './DiffResultTabs'
+import { DiffPanelContentArea } from './DiffPanelContentArea'
 import { DiffPanelSetupSection } from './DiffPanelSetupSection'
+import { DiffPanelToolbar } from './DiffPanelToolbar'
+import {
+  buildDiffPanelTabItems,
+  buildDiffPanelToolbarSummary,
+  DIFF_PANEL_SKIPPED_ROW_NOTICE,
+  getFullyIdenticalNotice
+} from './diff-panel-view-state'
 import {
   useDatabaseList,
   useDiffComparison,
@@ -230,67 +233,101 @@ export function DiffPanel() {
     })
   }
 
-  const tabItems = [
-    {
-      value: 'tables' as const,
-      label: (
-        <span className="flex items-center gap-2">
-          <span>Tables</span>
-          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            S {sourceTables.length}
-          </Badge>
-          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            T {targetTables.length}
-          </Badge>
-        </span>
+  const tabItems = buildDiffPanelTabItems({
+    sourceTableCount: sourceTables.length,
+    targetTableCount: targetTables.length,
+    comparisonEntryCount: comparisonEntries.length,
+    compareErrorCount,
+    visibleSchemaDiffCount: visibleSchemaDiffs.length,
+    compareData,
+    rowChangedTableCount,
+    rowSkippedTableCount
+  })
+  const diffToolbarSummary = buildDiffPanelToolbarSummary({
+    diff,
+    comparePhase,
+    rowChangedTableCount,
+    rowSkippedTableCount
+  })
+  const identicalNotice = diff && fullyIdentical ? getFullyIdenticalNotice(compareData) : null
+  const skippedRowNotice =
+    diff &&
+    compareData &&
+    diff.tableDiffs.length === 0 &&
+    hasSkippedRowComparison &&
+    !fullyIdentical
+      ? DIFF_PANEL_SKIPPED_ROW_NOTICE
+      : null
+
+  const resultBody = resultTab === 'tables'
+    ? (
+        <TablesTabContent
+          sourceTables={sourceTables}
+          targetTables={targetTables}
+          sharedTableCount={sharedTableCount}
+          phase={comparePhase}
+        />
       )
-    },
-    {
-      value: 'status' as const,
-      label: (
-        <span className="flex items-center gap-2">
-          <span>Status</span>
-          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            {comparisonEntries.length}
-          </Badge>
-          {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
-        </span>
-      )
-    },
-    {
-      value: 'schema' as const,
-      label: (
-        <span className="flex items-center gap-2">
-          <span>Structure diff</span>
-          <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            {visibleSchemaDiffs.length} changed
-          </Badge>
-          {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
-        </span>
-      )
-    },
-    ...(compareData
-      ? [
-          {
-            value: 'data' as const,
-            label: (
-              <span className="flex items-center gap-2">
-                <span>Content diff</span>
-                <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                  {rowChangedTableCount} changed
-                </Badge>
-                {rowSkippedTableCount > 0 && (
-                  <Badge variant="warning">{rowSkippedTableCount} skipped</Badge>
-                )}
-                {compareErrorCount > 0 && (
-                  <Badge variant="destructive">{compareErrorCount} errors</Badge>
-                )}
-              </span>
+    : resultTab === 'status'
+      ? (
+          <StatusTabContent
+            comparisonEntries={comparisonEntries}
+            prioritizedComparisonEntries={prioritizedComparisonEntries}
+            filteredComparisonEntries={filteredComparisonEntries}
+            sharedTableCount={sharedTableCount}
+            completedSharedTableCount={completedSharedTableCount}
+            pendingSharedTable={pendingSharedTable}
+            hasCompareErrors={hasCompareErrors}
+            comparePhase={comparePhase}
+            statusFilter={statusFilter}
+            tableSearchQuery={tableSearchQuery}
+            selectedComparisonTable={selectedComparisonTable}
+            onSelectTable={setSelectedComparisonTable}
+            onSearchChange={(value) =>
+              setPreferences((current) => ({ ...current, tableSearchQuery: value }))
+            }
+            onClearSearch={() =>
+              setPreferences((current) => ({ ...current, tableSearchQuery: '' }))
+            }
+            onStatusFilterChange={(value) =>
+              setPreferences((current) => ({ ...current, statusFilter: value }))
+            }
+            onOpenCompare={openCompareView}
+            onOpenSource={(table) => openComparedTable('source', table)}
+            onOpenTarget={(table) => openComparedTable('target', table)}
+          />
+        )
+      : resultTab === 'schema'
+        ? (
+            <SchemaTabContent
+              schemaDiffs={visibleSchemaDiffs}
+              hasRowComparisonResults={hasRowComparisonResults}
+              onOpenCompare={openCompareView}
+              onOpenSource={(table) => openComparedTable('source', table)}
+              onOpenTarget={(table) => openComparedTable('target', table)}
+            />
+          )
+        : hasRowComparisonResults && diff
+          ? (
+              <RowComparisonSection
+                rowComparisons={diff.rowComparisons}
+                showAll={showAllRowComparisons}
+                onToggleShowAll={() => setShowAllRowComparisons((current) => !current)}
+                onOpenCompare={openCompareView}
+                onOpenSource={(table) => openComparedTable('source', table)}
+                onOpenTarget={(table) => openComparedTable('target', table)}
+              />
             )
-          }
-        ]
-      : [])
-  ]
+          : (
+              <EmptyResultState
+                title="No content comparison results"
+                description={
+                  compareData
+                    ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
+                    : 'Enable Compare rows before running Compare to inspect row-level changes here.'
+                }
+              />
+            )
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
@@ -326,187 +363,44 @@ export function DiffPanel() {
         }}
       />
 
-      <div className="border-b border-border px-4 py-3">
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="flex flex-wrap items-center gap-2 rounded-xl bg-card/15 p-1.5">
-            <Button
-              size="sm"
-              className="h-8 min-w-[10rem] px-3"
-              onClick={runCompare}
-              disabled={loading}
-            >
-              {formatCompareButtonLabel(comparePhase, completedSharedTableCount, sharedTableCount)}
-            </Button>
-            <label className="flex h-8 items-center gap-2 rounded-lg bg-background/35 px-2.5 text-xs text-muted-foreground">
-              <Checkbox
-                className="h-3.5 w-3.5"
-                checked={compareData}
-                onChange={(event) => setCompareData(event.target.checked)}
-              />
-              <span>Compare rows</span>
-            </label>
-            <div className="flex h-8 items-center gap-2 rounded-lg bg-background/35 px-2.5 text-xs text-muted-foreground">
-              <span>Parallel</span>
-              <Select
-                className="h-7 w-20 border-border/50 bg-transparent px-2 text-xs"
-                value={String(tableCompareConcurrency)}
-                disabled={loading}
-                onChange={(event) =>
-                  setPreferences((current) => ({
-                    ...current,
-                    tableCompareConcurrency: parseTableCompareConcurrency(event.target.value)
-                  }))
-                }
-                options={TABLE_COMPARE_CONCURRENCY_OPTIONS.map((value) => ({
-                  value: String(value),
-                  label: `${value}`
-                }))}
-              />
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-8 px-3"
-              disabled={comparePhase !== 'done' || !diff || diff.tableDiffs.length === 0}
-              onClick={() => setShowSync(true)}
-            >
-              Plan Sync
-            </Button>
-          </div>
-          {diff && (
-            <div className="ml-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
-              <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                {diff.tableDiffs.length} structure
-              </Badge>
-              {compareData && diff.rowComparisons.length > 0 && (
-                <>
-                  <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                    {diff.rowComparisons.length} checked
-                  </Badge>
-                  {comparePhase === 'done' &&
-                  rowChangedTableCount === 0 &&
-                  rowSkippedTableCount === 0 ? (
-                    <Badge variant="success">rows identical</Badge>
-                  ) : (
-                    <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                      {rowChangedTableCount} changed
-                    </Badge>
-                  )}
-                </>
-              )}
-              {compareData && rowSkippedTableCount > 0 && (
-                <Badge variant="warning">{rowSkippedTableCount} skipped</Badge>
-              )}
-            </div>
-          )}
-        </div>
-      </div>
+      <DiffPanelToolbar
+        compareButtonLabel={formatCompareButtonLabel(
+          comparePhase,
+          completedSharedTableCount,
+          sharedTableCount
+        )}
+        compareData={compareData}
+        concurrency={tableCompareConcurrency}
+        concurrencyOptions={TABLE_COMPARE_CONCURRENCY_OPTIONS}
+        diffSummary={diffToolbarSummary}
+        loading={loading}
+        canPlanSync={comparePhase === 'done' && !!diff && diff.tableDiffs.length > 0}
+        onCompare={runCompare}
+        onCompareDataChange={setCompareData}
+        onConcurrencyChange={(value) =>
+          setPreferences((current) => ({
+            ...current,
+            tableCompareConcurrency: parseTableCompareConcurrency(value)
+          }))
+        }
+        onPlanSync={() => setShowSync(true)}
+      />
 
-      <div className="min-h-0 flex-1 overflow-auto">
-        <div className="flex min-h-full flex-col gap-3 p-4">
-          {comparePhase === 'idle' && (
-            <div className="text-xs text-muted-foreground">
-              Choose source &amp; target then click Compare. Row comparison uses shared primary keys
-              when possible and falls back to all shared columns when needed.
-            </div>
-          )}
-          {compareContext && (
-            <div className="flex min-h-[32rem] min-w-0 flex-1 flex-col rounded-xl border border-border/60 bg-card/10">
-              <Tabs
-                className="px-4 pt-3"
-                value={resultTab}
-                onValueChange={(value) =>
-                  setPreferences((current) => ({
-                    ...current,
-                    resultTab: value as DiffResultTab
-                  }))
-                }
-                items={tabItems}
-              />
-
-              <div className="flex min-h-0 flex-1 flex-col p-4 pt-3">
-                {resultTab === 'tables' ? (
-                  <TablesTabContent
-                    sourceTables={sourceTables}
-                    targetTables={targetTables}
-                    sharedTableCount={sharedTableCount}
-                    phase={comparePhase}
-                  />
-                ) : resultTab === 'status' ? (
-                  <StatusTabContent
-                    comparisonEntries={comparisonEntries}
-                    prioritizedComparisonEntries={prioritizedComparisonEntries}
-                    filteredComparisonEntries={filteredComparisonEntries}
-                    sharedTableCount={sharedTableCount}
-                    completedSharedTableCount={completedSharedTableCount}
-                    pendingSharedTable={pendingSharedTable}
-                    hasCompareErrors={hasCompareErrors}
-                    comparePhase={comparePhase}
-                    statusFilter={statusFilter}
-                    tableSearchQuery={tableSearchQuery}
-                    selectedComparisonTable={selectedComparisonTable}
-                    onSelectTable={setSelectedComparisonTable}
-                    onSearchChange={(value) =>
-                      setPreferences((current) => ({ ...current, tableSearchQuery: value }))
-                    }
-                    onClearSearch={() =>
-                      setPreferences((current) => ({ ...current, tableSearchQuery: '' }))
-                    }
-                    onStatusFilterChange={(value) =>
-                      setPreferences((current) => ({ ...current, statusFilter: value }))
-                    }
-                    onOpenCompare={openCompareView}
-                    onOpenSource={(table) => openComparedTable('source', table)}
-                    onOpenTarget={(table) => openComparedTable('target', table)}
-                  />
-                ) : resultTab === 'schema' ? (
-                  <SchemaTabContent
-                    schemaDiffs={visibleSchemaDiffs}
-                    hasRowComparisonResults={hasRowComparisonResults}
-                    onOpenCompare={openCompareView}
-                    onOpenSource={(table) => openComparedTable('source', table)}
-                    onOpenTarget={(table) => openComparedTable('target', table)}
-                  />
-                ) : hasRowComparisonResults && diff ? (
-                  <RowComparisonSection
-                    rowComparisons={diff.rowComparisons}
-                    showAll={showAllRowComparisons}
-                    onToggleShowAll={() => setShowAllRowComparisons((current) => !current)}
-                    onOpenCompare={openCompareView}
-                    onOpenSource={(table) => openComparedTable('source', table)}
-                    onOpenTarget={(table) => openComparedTable('target', table)}
-                  />
-                ) : (
-                  <EmptyResultState
-                    title="No content comparison results"
-                    description={
-                      compareData
-                        ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
-                        : 'Enable Compare rows before running Compare to inspect row-level changes here.'
-                    }
-                  />
-                )}
-              </div>
-            </div>
-          )}
-          {diff && fullyIdentical && (
-            <div className="text-xs text-emerald-400">
-              Source and target are identical
-              {compareData ? ' at schema and row level.' : ' at schema level.'}
-            </div>
-          )}
-          {diff &&
-            compareData &&
-            diff.tableDiffs.length === 0 &&
-            hasSkippedRowComparison &&
-            !fullyIdentical && (
-              <div className="text-xs text-amber-400">
-                Schema is identical, but some row comparisons were skipped. Open the Content diff
-                tab for details.
-              </div>
-            )}
-        </div>
-      </div>
+      <DiffPanelContentArea
+        showIdleNotice={comparePhase === 'idle'}
+        showResult={!!compareContext}
+        resultTab={resultTab}
+        tabItems={tabItems}
+        onResultTabChange={(value) =>
+          setPreferences((current) => ({
+            ...current,
+            resultTab: value
+          }))
+        }
+        resultBody={resultBody}
+        identicalNotice={identicalNotice}
+        skippedNotice={skippedRowNotice}
+      />
 
       {showSync && diff && (
         <SyncPanel
