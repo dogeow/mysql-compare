@@ -5,22 +5,18 @@ export const DEFAULT_TABLE_COMPARE_CONCURRENCY = 3
 export const DEFAULT_TABLE_STATUS_FILTER = 'all'
 export const DEFAULT_DIFF_RESULT_TAB = 'status'
 export const DEFAULT_COMPARE_SETUP_EXPANDED = true
-export const DEFAULT_SOURCE_TABLES_EXPANDED = false
-export const DEFAULT_TARGET_TABLES_EXPANDED = false
 export const DEFAULT_TABLE_SEARCH_QUERY = ''
 export const DIFF_PANEL_PREFERENCES_KEY = 'mysql-compare:diff-panel-preferences'
 
 export type TableCompareStatus = 'queued' | 'comparing' | 'done' | 'error'
 export type TableStatusFilter = 'all' | 'comparing' | 'changed' | 'schema-changed' | 'row-changed'
-export type DiffResultTab = 'status' | 'schema' | 'data'
+export type DiffResultTab = 'tables' | 'status' | 'schema' | 'data'
 
 export interface DiffPanelPreferences {
   statusFilter: TableStatusFilter
   tableCompareConcurrency: number
   resultTab: DiffResultTab
   setupExpanded: boolean
-  sourceTablesExpanded: boolean
-  targetTablesExpanded: boolean
   tableSearchQuery: string
 }
 
@@ -293,22 +289,20 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
       targetTablesExpanded?: unknown
       tableSearchQuery?: unknown
     }
+    const legacyTablesVisible =
+      parsed.sourceTablesExpanded === true || parsed.targetTablesExpanded === true
+    const hasExplicitResultTab = isDiffResultTab(parsed.resultTab)
 
     return {
       statusFilter: parseTableStatusFilter(parsed.statusFilter),
       tableCompareConcurrency: parseTableCompareConcurrency(
         String(parsed.tableCompareConcurrency ?? '')
       ),
-      resultTab: parseDiffResultTab(parsed.resultTab),
+      resultTab:
+        !hasExplicitResultTab && legacyTablesVisible
+          ? 'tables'
+          : parseDiffResultTab(parsed.resultTab),
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: parseBooleanPreference(
-        parsed.sourceTablesExpanded,
-        DEFAULT_SOURCE_TABLES_EXPANDED
-      ),
-      targetTablesExpanded: parseBooleanPreference(
-        parsed.targetTablesExpanded,
-        DEFAULT_TARGET_TABLES_EXPANDED
-      ),
       tableSearchQuery: parseStringPreference(parsed.tableSearchQuery, DEFAULT_TABLE_SEARCH_QUERY)
     }
   } catch {
@@ -322,8 +316,6 @@ function createDefaultDiffPanelPreferences(): DiffPanelPreferences {
     tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
     resultTab: DEFAULT_DIFF_RESULT_TAB,
     setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-    sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-    targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
     tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
   }
 }
@@ -368,13 +360,11 @@ function parseTableStatusFilter(value: unknown): TableStatusFilter {
 }
 
 function parseDiffResultTab(value: unknown): DiffResultTab {
-  return value === 'status' || value === 'schema' || value === 'data'
-    ? value
-    : DEFAULT_DIFF_RESULT_TAB
+  return isDiffResultTab(value) ? value : DEFAULT_DIFF_RESULT_TAB
 }
 
-function parseBooleanPreference(value: unknown, fallback: boolean): boolean {
-  return typeof value === 'boolean' ? value : fallback
+function isDiffResultTab(value: unknown): value is DiffResultTab {
+  return value === 'tables' || value === 'status' || value === 'schema' || value === 'data'
 }
 
 function parseStringPreference(value: unknown, fallback: string): string {

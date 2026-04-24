@@ -295,8 +295,8 @@ export function TableCompareView({
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <div className="border-b border-border bg-card px-4 py-3">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-center xl:justify-between">
-          <div className="min-w-0">
+        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+          <div className="min-w-0 space-y-1">
             <div className="text-xs text-muted-foreground">Side-by-side table compare</div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <strong className="truncate">{sourceConnectionName}</strong>
@@ -308,8 +308,13 @@ export function TableCompareView({
               <span className="truncate">{targetDatabase}</span>
               <Badge>{table}</Badge>
             </div>
+            <p className="text-xs text-muted-foreground">
+              {stableOrderColumn
+                ? `Ordered by ${stableOrderColumn}; selection tracked by primary key.`
+                : 'No shared primary key — rows may not line up across sides.'}
+            </p>
           </div>
-          <div className="flex flex-wrap items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
             <Badge>{selectedCount} selected</Badge>
             <Button size="sm" variant="outline" onClick={refreshBoth}>
               <RefreshCw className="mr-1 h-4 w-4" /> Refresh
@@ -330,56 +335,58 @@ export function TableCompareView({
             </Button>
           </div>
         </div>
-        <div className="mt-3 flex flex-col gap-2 text-xs text-muted-foreground xl:flex-row xl:items-center xl:justify-between">
-          <span>
-            {stableOrderColumn
-              ? `Both sides are ordered by ${stableOrderColumn} for page-by-page inspection, and source selection is tracked by primary key.`
-              : 'This view shows the same page from each table. If the tables do not share a primary key column, rows may not line up one-to-one.'}
-          </span>
-          <div className="flex flex-wrap items-center gap-3">
-            {rowDiffNavigation.totalDiffTables > 0 && (
-              <div className="flex items-center gap-2">
-                <span>
-                  {rowDiffNavigation.currentDiffPosition === null
-                    ? `${rowDiffNavigation.totalDiffTables} changed table(s)`
-                    : `Diff table ${rowDiffNavigation.currentDiffPosition} / ${rowDiffNavigation.totalDiffTables}`}
-                </span>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!rowDiffNavigation.previousTable}
-                  onClick={() =>
-                    rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
-                  }
-                >
-                  Prev diff
-                </Button>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  disabled={!rowDiffNavigation.nextTable}
-                  onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
-                >
-                  Next diff
-                </Button>
-              </div>
-            )}
-            <div className="flex items-center gap-2">
-              <span>
-                Page {page} / {totalPages}
-              </span>
-              <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-                Prev
-              </Button>
+        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
+          {rowDiffNavigation.totalDiffTables > 0 && (
+            <div className="flex items-center gap-1.5">
               <Button
                 size="sm"
                 variant="outline"
-                disabled={page >= totalPages}
-                onClick={() => setPage(page + 1)}
+                className="h-7 px-2"
+                disabled={!rowDiffNavigation.previousTable}
+                onClick={() =>
+                  rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
+                }
               >
-                Next
+                ← Prev diff
+              </Button>
+              <span className="tabular-nums">
+                {rowDiffNavigation.currentDiffPosition === null
+                  ? `${rowDiffNavigation.totalDiffTables} changed`
+                  : `Diff ${rowDiffNavigation.currentDiffPosition} / ${rowDiffNavigation.totalDiffTables}`}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 px-2"
+                disabled={!rowDiffNavigation.nextTable}
+                onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
+              >
+                Next diff →
               </Button>
             </div>
+          )}
+          <div className="ml-auto flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              ← Prev
+            </Button>
+            <span className="tabular-nums">
+              Page {page} / {totalPages}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-7 px-2"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              Next →
+            </Button>
           </div>
         </div>
         {sourceState.data && !sourceState.data.hasPrimaryKey && (

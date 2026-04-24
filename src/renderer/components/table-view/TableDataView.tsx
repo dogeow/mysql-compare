@@ -186,12 +186,22 @@ export function TableDataView({ connectionId, database, table }: Props) {
                 <Th className="w-8" />
                 {data.columns.map((c) => (
                   <Th key={c.name} className="cursor-pointer" onClick={() => onSort(c.name)}>
-                    <div className="flex items-center gap-1">
-                      {c.isPrimaryKey && <Badge variant="warning">PK</Badge>}
-                      <span>{c.name}</span>
-                      <span className="text-[10px] text-muted-foreground">{c.type}</span>
-                      {orderBy?.column === c.name && (
-                        <span className="text-[10px]">{orderBy.dir === 'ASC' ? '▲' : '▼'}</span>
+                    <div className="flex flex-col items-start gap-1 whitespace-normal py-1 leading-tight">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {c.isPrimaryKey && <Badge variant="warning">PK</Badge>}
+                        <span>{c.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{c.type}</span>
+                        {orderBy?.column === c.name && (
+                          <span className="text-[10px]">{orderBy.dir === 'ASC' ? '▲' : '▼'}</span>
+                        )}
+                    </div>
+                      {c.comment && (
+                        <span
+                          className="max-w-[14rem] truncate text-[10px] font-normal text-amber-300/90"
+                          title={c.comment}
+                        >
+                          {c.comment}
+                        </span>
                       )}
                     </div>
                   </Th>

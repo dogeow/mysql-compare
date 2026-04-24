@@ -5,7 +5,11 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
+import { Select } from '@renderer/components/ui/select'
 import type { ColumnInfo } from '../../../shared/types'
+
+const NULL_ENUM_SELECT_VALUE = '__mysql_compare_null__'
+const EMPTY_ENUM_PLACEHOLDER_VALUE = '__mysql_compare_empty__'
 
 interface Props {
   mode: 'insert' | 'edit'
@@ -77,7 +81,7 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
       open
       onOpenChange={(o) => !o && onClose()}
       title={mode === 'insert' ? 'Insert Row' : 'Edit Row'}
-      className="max-w-2xl"
+      className="max-w-4xl"
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={busy}>
@@ -89,14 +93,26 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
         </>
       }
     >
-      <div className="grid grid-cols-2 gap-3 max-h-[60vh] overflow-y-auto">
+      <div className="grid max-h-[70vh] grid-cols-1 gap-3 overflow-y-auto pr-1 md:grid-cols-2">
         {columns.map((column) => (
           <div key={column.name}>
-            <Label className="block mb-1">
-              {column.name}
-              <span className="ml-1 text-[10px] opacity-60">{column.type}</span>
-              {column.isPrimaryKey && <span className="ml-1 text-amber-400 text-[10px]">PK</span>}
-              {!column.nullable && <span className="ml-1 text-red-400 text-[10px]">*</span>}
+            <Label className="mb-1 block">
+              <div className="flex flex-wrap items-center gap-1.5">
+                <span>{column.name}</span>
+                <span className="text-[10px] opacity-60">{column.type}</span>
+                {column.isPrimaryKey && <span className="text-[10px] text-amber-400">PK</span>}
+                {!column.nullable && <span className="text-[10px] text-red-400">*</span>}
+                {column.comment && (
+                  <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
+                    Comment
+                  </span>
+                )}
+              </div>
+              {column.comment && (
+                <div className="mt-1 text-[11px] leading-4 text-muted-foreground">
+                  {column.comment}
+                </div>
+              )}
             </Label>
             {renderInput(column, values[column.name], (nextValue) => {
               setError(null)
@@ -201,12 +217,27 @@ function renderInput(
   value: unknown,
   onChange: (v: unknown) => void
 ): React.ReactNode {
+  const enumOptions = getEnumOptions(c)
+
   // tinyint(1) → boolean
   if (c.type === 'tinyint(1)') {
     return (
       <Checkbox
         checked={value === 1 || value === true || value === '1'}
         onChange={(e) => onChange(e.target.checked ? 1 : 0)}
+      />
+    )
+  }
+  if (enumOptions.length > 0) {
+    const stringValue = value == null ? '' : String(value)
+    const selectValue = getEnumSelectValue(stringValue, c.nullable, enumOptions, value)
+    const options = buildEnumSelectOptions(enumOptions, c.nullable, selectValue, stringValue)
+
+    return (
+      <Select
+        value={selectValue}
+        options={options}
+        onChange={(e) => onChange(parseEnumSelectValue(e.target.value, c.nullable))}
       />
     )
   }
@@ -235,4 +266,111 @@ function renderInput(
       onChange={(e) => onChange(e.target.value)}
     />
   )
+}
+
+function getEnumOptions(column: ColumnInfo): string[] {
+  const match = /^enum\((.*)\)$/i.exec(column.type.trim())
+  if (!match) return []
+
+  return parseEnumValues(match[1] ?? '')
+}
+
+function parseEnumValues(raw: string): string[] {
+  const values: string[] = []
+  let index = 0
+
+  while (index < raw.length) {
+    while (index < raw.length && (raw[index] === ',' || /\s/.test(raw[index] ?? ''))) {
+      index += 1
+    }
+    if (index >= raw.length || raw[index] !== "'") break
+
+    index += 1
+    let value = ''
+
+    while (index < raw.length) {
+      const char = raw[index]!
+      const nextChar = raw[index + 1]
+
+      if (char === '\\' && nextChar) {
+        value += nextChar
+        index += 2
+        continue
+      }
+
+      if (char === "'" && nextChar === "'") {
+        value += "'"
+        index += 2
+        continue
+      }
+
+      if (char === "'") {
+        index += 1
+        break
+      }
+
+      value += char
+      index += 1
+    }
+
+    values.push(value)
+  }
+
+  return values
+}
+
+function buildEnumSelectOptions(
+  enumOptions: string[],
+  nullable: boolean,
+  selectValue: string,
+  currentValue: string
+): { value: string; label: string }[] {
+  const options: { value: string; label: string }[] = []
+
+  if (nullable) {
+    options.push({ value: NULL_ENUM_SELECT_VALUE, label: 'NULL' })
+  }
+
+  if (selectValue === EMPTY_ENUM_PLACEHOLDER_VALUE) {
+    options.push({ value: EMPTY_ENUM_PLACEHOLDER_VALUE, label: 'Select...' })
+  }
+
+  if (currentValue !== '' && !enumOptions.includes(currentValue)) {
+    options.push({ value: currentValue, label: currentValue })
+  }
+
+  options.push(
+    ...enumOptions.map((option) => ({
+      value: option,
+      label: option === '' ? '(empty string)' : option
+    }))
+  )
+
+  return options
+}
+
+function getEnumSelectValue(
+  currentValue: string,
+  nullable: boolean,
+  enumOptions: string[],
+  rawValue: unknown
+): string {
+  if (rawValue == null) {
+    return nullable ? NULL_ENUM_SELECT_VALUE : EMPTY_ENUM_PLACEHOLDER_VALUE
+  }
+
+  if (currentValue === '' && !enumOptions.includes('')) {
+    return EMPTY_ENUM_PLACEHOLDER_VALUE
+  }
+
+  return currentValue
+}
+
+function parseEnumSelectValue(value: string, nullable: boolean): string | null {
+  if (value === NULL_ENUM_SELECT_VALUE) return null
+  if (value === EMPTY_ENUM_PLACEHOLDER_VALUE) {
+    return nullable ? null : ''
+  }
+
+  return value
 }

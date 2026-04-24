@@ -4,9 +4,7 @@ import {
   DEFAULT_COMPARE_SETUP_EXPANDED,
   DEFAULT_DIFF_RESULT_TAB,
   DEFAULT_TABLE_COMPARE_CONCURRENCY,
-  DEFAULT_SOURCE_TABLES_EXPANDED,
   DEFAULT_TABLE_SEARCH_QUERY,
-  DEFAULT_TARGET_TABLES_EXPANDED,
   filterChangedRowComparisons,
   filterComparisonEntries,
   getPreferredComparisonTable,
@@ -249,11 +247,28 @@ describe('diff-panel-utils', () => {
     })
   })
 
-  it('restores the new status result tab from persisted preferences', () => {
+  it('restores the tables result tab from persisted preferences', () => {
     expect(
       parseDiffPanelPreferences(
         JSON.stringify({
-          resultTab: 'status'
+          resultTab: 'tables'
+        })
+      )
+    ).toEqual({
+      statusFilter: 'all',
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: 'tables',
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+    })
+  })
+
+  it('keeps an explicit result tab even when legacy expanded table-list flags are present', () => {
+    expect(
+      parseDiffPanelPreferences(
+        JSON.stringify({
+          resultTab: 'status',
+          sourceTablesExpanded: true
         })
       )
     ).toEqual({
@@ -261,8 +276,22 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: 'status',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+    })
+  })
+
+  it('maps legacy expanded table-list preferences to the tables result tab when no explicit tab exists', () => {
+    expect(
+      parseDiffPanelPreferences(
+        JSON.stringify({
+          sourceTablesExpanded: true
+        })
+      )
+    ).toEqual({
+      statusFilter: 'all',
+      tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
+      resultTab: 'tables',
+      setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
       tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     })
   })
@@ -275,8 +304,6 @@ describe('diff-panel-utils', () => {
           tableCompareConcurrency: 8,
           resultTab: 'data',
           setupExpanded: false,
-          sourceTablesExpanded: true,
-          targetTablesExpanded: true,
           tableSearchQuery: 'users'
         })
       )
@@ -285,22 +312,18 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: 8,
       resultTab: 'data',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: true,
-      targetTablesExpanded: true,
       tableSearchQuery: 'users'
     })
 
     expect(
       parseDiffPanelPreferences(
-        '{"statusFilter":"invalid","tableCompareConcurrency":99,"resultTab":"invalid","setupExpanded":"no","sourceTablesExpanded":"yes","tableSearchQuery":123}'
+        '{"statusFilter":"invalid","tableCompareConcurrency":99,"resultTab":"invalid","setupExpanded":"no","tableSearchQuery":123}'
       )
     ).toEqual({
       statusFilter: 'all',
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: DEFAULT_DIFF_RESULT_TAB,
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
       tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     })
 
@@ -309,8 +332,6 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: DEFAULT_DIFF_RESULT_TAB,
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      sourceTablesExpanded: DEFAULT_SOURCE_TABLES_EXPANDED,
-      targetTablesExpanded: DEFAULT_TARGET_TABLES_EXPANDED,
       tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
     })
   })
