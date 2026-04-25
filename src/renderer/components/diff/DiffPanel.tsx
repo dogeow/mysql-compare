@@ -13,19 +13,16 @@ import {
   parseTableCompareConcurrency,
   prioritizeComparisonEntries,
   TABLE_COMPARE_CONCURRENCY_OPTIONS,
-  type DiffResultTab,
-  type TableCompareEntry
+  type DiffResultTab
 } from './diff-panel-utils'
 import {
   buildDatabaseOptions,
   formatCompareButtonLabel,
   formatCompareSetupSummary
 } from './diff-panel-formatters'
-import { EmptyResultState } from './diff-panel-presentation'
-import { RowComparisonSection } from './RowComparisonSection'
 import { SyncPanel } from './SyncPanel'
-import { SchemaTabContent, StatusTabContent, TablesTabContent } from './DiffResultTabs'
 import { DiffPanelContentArea } from './DiffPanelContentArea'
+import { DiffPanelResultBody } from './DiffPanelResultBody'
 import { DiffPanelSetupSection } from './DiffPanelSetupSection'
 import { DiffPanelToolbar } from './DiffPanelToolbar'
 import {
@@ -259,76 +256,6 @@ export function DiffPanel() {
       ? DIFF_PANEL_SKIPPED_ROW_NOTICE
       : null
 
-  const resultBody = resultTab === 'tables'
-    ? (
-        <TablesTabContent
-          sourceTables={sourceTables}
-          targetTables={targetTables}
-          sharedTableCount={sharedTableCount}
-          phase={comparePhase}
-        />
-      )
-    : resultTab === 'status'
-      ? (
-          <StatusTabContent
-            comparisonEntries={comparisonEntries}
-            prioritizedComparisonEntries={prioritizedComparisonEntries}
-            filteredComparisonEntries={filteredComparisonEntries}
-            sharedTableCount={sharedTableCount}
-            completedSharedTableCount={completedSharedTableCount}
-            pendingSharedTable={pendingSharedTable}
-            hasCompareErrors={hasCompareErrors}
-            comparePhase={comparePhase}
-            statusFilter={statusFilter}
-            tableSearchQuery={tableSearchQuery}
-            selectedComparisonTable={selectedComparisonTable}
-            onSelectTable={setSelectedComparisonTable}
-            onSearchChange={(value) =>
-              setPreferences((current) => ({ ...current, tableSearchQuery: value }))
-            }
-            onClearSearch={() =>
-              setPreferences((current) => ({ ...current, tableSearchQuery: '' }))
-            }
-            onStatusFilterChange={(value) =>
-              setPreferences((current) => ({ ...current, statusFilter: value }))
-            }
-            onOpenCompare={openCompareView}
-            onOpenSource={(table) => openComparedTable('source', table)}
-            onOpenTarget={(table) => openComparedTable('target', table)}
-          />
-        )
-      : resultTab === 'schema'
-        ? (
-            <SchemaTabContent
-              schemaDiffs={visibleSchemaDiffs}
-              hasRowComparisonResults={hasRowComparisonResults}
-              onOpenCompare={openCompareView}
-              onOpenSource={(table) => openComparedTable('source', table)}
-              onOpenTarget={(table) => openComparedTable('target', table)}
-            />
-          )
-        : hasRowComparisonResults && diff
-          ? (
-              <RowComparisonSection
-                rowComparisons={diff.rowComparisons}
-                showAll={showAllRowComparisons}
-                onToggleShowAll={() => setShowAllRowComparisons((current) => !current)}
-                onOpenCompare={openCompareView}
-                onOpenSource={(table) => openComparedTable('source', table)}
-                onOpenTarget={(table) => openComparedTable('target', table)}
-              />
-            )
-          : (
-              <EmptyResultState
-                title="No content comparison results"
-                description={
-                  compareData
-                    ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
-                    : 'Enable Compare rows before running Compare to inspect row-level changes here.'
-                }
-              />
-            )
-
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
       <DiffPanelSetupSection
@@ -397,7 +324,45 @@ export function DiffPanel() {
             resultTab: value
           }))
         }
-        resultBody={resultBody}
+        resultBody={
+          <DiffPanelResultBody
+            resultTab={resultTab}
+            compareData={compareData}
+            comparePhase={comparePhase}
+            diff={diff}
+            sourceTables={sourceTables}
+            targetTables={targetTables}
+            sharedTableCount={sharedTableCount}
+            comparisonEntries={comparisonEntries}
+            prioritizedComparisonEntries={prioritizedComparisonEntries}
+            filteredComparisonEntries={filteredComparisonEntries}
+            completedSharedTableCount={completedSharedTableCount}
+            pendingSharedTable={pendingSharedTable}
+            hasCompareErrors={hasCompareErrors}
+            statusFilter={statusFilter}
+            tableSearchQuery={tableSearchQuery}
+            selectedComparisonTable={selectedComparisonTable}
+            visibleSchemaDiffs={visibleSchemaDiffs}
+            hasRowComparisonResults={hasRowComparisonResults}
+            showAllRowComparisons={showAllRowComparisons}
+            onToggleShowAllRowComparisons={() =>
+              setShowAllRowComparisons((current) => !current)
+            }
+            onSelectComparisonTable={setSelectedComparisonTable}
+            onSearchChange={(value) =>
+              setPreferences((current) => ({ ...current, tableSearchQuery: value }))
+            }
+            onClearSearch={() =>
+              setPreferences((current) => ({ ...current, tableSearchQuery: '' }))
+            }
+            onStatusFilterChange={(value) =>
+              setPreferences((current) => ({ ...current, statusFilter: value }))
+            }
+            onOpenCompare={openCompareView}
+            onOpenSource={(table) => openComparedTable('source', table)}
+            onOpenTarget={(table) => openComparedTable('target', table)}
+          />
+        }
         identicalNotice={identicalNotice}
         skippedNotice={skippedRowNotice}
       />

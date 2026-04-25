@@ -18,6 +18,15 @@ import type {
 } from '../../../shared/types'
 import type { DbDriver, Dialect, StreamRowsOptions } from './types'
 import { pgDialect, renderPgCreateTable } from './pg-dialect'
+import {
+  assertColumns,
+  assertNonEmptySQL,
+  assertSafeWhereClause,
+  buildPgOrderClause,
+  formatPgType,
+  parseIndexDef,
+  qualifiedName
+} from './pg-driver-utils'
 
 const MAX_PAGE_SIZE = 1000
 const DEFAULT_SCHEMA = 'public'
@@ -400,77 +409,4 @@ export class PostgresDriver implements DbDriver {
       throw new Error(`Table "${table}" already exists`)
     }
   }
-}
-
-function formatPgType(r: {
-  data_type: string
-  udt_name: string
-  character_maximum_length: number | null
-  numeric_precision: number | null
-  numeric_scale: number | null
-}): string {
-  if (r.character_maximum_length) {
-    return `${r.data_type}(${r.character_maximum_length})`
-  }
-  if (
-    r.data_type === 'numeric' &&
-    r.numeric_precision !== null &&
-    r.numeric_scale !== null
-  ) {
-    return `numeric(${r.numeric_precision},${r.numeric_scale})`
-  }
-  return r.data_type
-}
-
-function parseIndexDef(name: string, def: string): IndexInfo {
-  // 形如: CREATE [UNIQUE] INDEX "name" ON "schema"."table" USING btree ("col1", "col2")
-  const unique = /^CREATE\s+UNIQUE\s+INDEX/i.test(def)
-  const usingMatch = def.match(/USING\s+(\w+)/i)
-  const type = usingMatch ? usingMatch[1]!.toUpperCase() : 'BTREE'
-  const colsMatch = def.match(/\(([^)]+)\)\s*$/)
-  const columns = colsMatch
-    ? colsMatch[1]!.split(',').map((s) => s.trim().replace(/^"/, '').replace(/"$/, ''))
-    : []
-  return { name, columns, unique, type }
-}
-
-function buildPgOrderClause(
-  columns: string[],
-  primaryKey: string[],
-  orderBy?: { column: string; dir: 'ASC' | 'DESC' }
-): string {
-  const parts: string[] = []
-  const seen = new Set<string>()
-  if (orderBy) {
-    parts.push(`${pgDialect.quoteIdent(orderBy.column)} ${orderBy.dir}`)
-    seen.add(orderBy.column)
-  }
-  const stable = primaryKey.length > 0 ? primaryKey : columns
-  for (const name of stable) {
-    if (seen.has(name)) continue
-    parts.push(`${pgDialect.quoteIdent(name)} ASC`)
-    seen.add(name)
-  }
-  return parts.length > 0 ? `ORDER BY ${parts.join(', ')}` : ''
-}
-
-function qualifiedName(table: string): string {
-  return `"${DEFAULT_SCHEMA}"."${table.replace(/"/g, '""')}"`
-}
-
-function assertColumns(columns: string[], label: string): void {
-  for (const column of columns) {
-    assertNonEmptySQL(`${label} column`, column)
-  }
-}
-
-function assertSafeWhereClause(where?: string): void {
-  if (!where?.trim()) return
-  const trimmed = where.trim()
-  if (trimmed.includes(';')) throw new Error('WHERE clause must not contain semicolons')
-  if (/--|\/\*/.test(trimmed)) throw new Error('WHERE clause must not contain SQL comments')
-}
-
-function assertNonEmptySQL(label: string, value: string): void {
-  if (!value.trim()) throw new Error(`${label} is required`)
 }

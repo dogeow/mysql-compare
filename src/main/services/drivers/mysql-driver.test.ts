@@ -110,6 +110,47 @@ describe('MySQLDriver', () => {
     await expect(pending).resolves.toEqual([['users'], ['orders']])
   })
 
+  it('reuses a single pool when the same database is first opened concurrently', async () => {
+    let resolveQuery: ((value: unknown) => void) | undefined
+    let markQueryStarted: (() => void) | undefined
+    const queryStarted = new Promise<void>((resolve) => {
+      markQueryStarted = resolve
+    })
+    const poolA = createPoolDouble(
+      new Promise((resolve) => {
+        resolveQuery = resolve
+      }),
+      () => markQueryStarted?.()
+    )
+
+    createPool.mockImplementation((options?: { database?: string }) => {
+      if (options?.database === 'db_a') return poolA.pool
+      throw new Error(`Unexpected database ${options?.database}`)
+    })
+
+    const driver = new MySQLDriver({ connection: createConnectionConfig() })
+    const pending = Promise.all([driver.listTables('db_a'), driver.listTables('db_a')])
+
+    await queryStarted
+
+    expect(createPool).toHaveBeenCalledTimes(1)
+    expect(driver.getPoolDebugSnapshot()).toMatchObject({
+      cachedPools: 1,
+      stats: {
+        createdPools: 1,
+        reusedPools: 1,
+        evictedPools: 0,
+        skippedEvictions: 0
+      },
+      entries: [{ database: 'db_a', activeUsers: 2 }]
+    })
+
+    resolveQuery?.([[{ TABLE_NAME: 'users' }]])
+
+    await expect(pending).resolves.toEqual([['users'], ['users']])
+    expect(driver.getPoolDebugSnapshot().entries).toEqual([{ database: 'db_a', activeUsers: 0 }])
+  })
+
   it('does not evict a pool while it still has an active operation', async () => {
     let resolveActiveQuery: ((value: unknown) => void) | undefined
     let markActiveQueryStarted: (() => void) | undefined
@@ -253,6 +294,40 @@ describe('MySQLDriver', () => {
         skippedEvictions: 0
       }
     })
+  })
+
+  it('keeps the cache at the limit when different new databases open concurrently', async () => {
+    const pools = new Map<string, ReturnType<typeof createPoolDouble>>()
+
+    createPool.mockImplementation((options?: { database?: string }) => {
+      const database = options?.database ?? '__default__'
+      const existing = pools.get(database)
+      if (existing) return existing.pool
+
+      const poolDouble = createPoolDouble([[{ TABLE_NAME: database }]])
+      pools.set(database, poolDouble)
+      return poolDouble.pool
+    })
+
+    const driver = new MySQLDriver({ connection: createConnectionConfig() })
+
+    for (let index = 1; index <= 8; index += 1) {
+      await driver.listTables(`db_${index}`)
+    }
+
+    await Promise.all([driver.listTables('db_9'), driver.listTables('db_10')])
+
+    expect(driver.getPoolDebugSnapshot()).toMatchObject({
+      cachedPools: 8,
+      stats: {
+        createdPools: 10,
+        reusedPools: 0,
+        evictedPools: 2,
+        skippedEvictions: 0
+      }
+    })
+    expect(pools.get('db_1')?.end).toHaveBeenCalledTimes(1)
+    expect(pools.get('db_2')?.end).toHaveBeenCalledTimes(1)
   })
 
   it('closes all cached pools on close', async () => {

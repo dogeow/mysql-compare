@@ -1,69 +1,20 @@
 // 左侧侧边栏：连接列表、连接 → 数据库 → 表的树
 import { useEffect, useRef, useState } from 'react'
-import {
-  ChevronRight,
-  ChevronDown,
-  Database,
-  Table as TableIcon,
-  Plus,
-  Search,
-  RefreshCw,
-  Pencil,
-  Trash2,
-  Copy,
-  FileCode2,
-  Download
-} from 'lucide-react'
-import { Button } from '@renderer/components/ui/button'
-import { Input } from '@renderer/components/ui/input'
-import { Label } from '@renderer/components/ui/label'
-import { Dialog } from '@renderer/components/ui/dialog'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { api, unwrap } from '@renderer/lib/api'
-import { ConnectionDialog } from '@renderer/components/connection/ConnectionDialog'
-import { ExportTableDialog } from '@renderer/components/table-view/ExportTableDialog'
 import type { SafeConnection, TableSchema } from '../../../shared/types'
-import { cn } from '@renderer/lib/utils'
-
-interface NodeState {
-  expanded: boolean
-  loading: boolean
-  databases?: string[]
-  tables: Record<string, string[]>
-  expandedDbs: Set<string>
-}
-
-interface TableMenuState {
-  x: number
-  y: number
-  connection: SafeConnection
-  database: string
-  table: string
-}
-
-interface RenameDialogState {
-  connection: SafeConnection
-  database: string
-  table: string
-}
-
-interface CreateSQLDialogState {
-  title: string
-  sql: string
-  loading: boolean
-}
-
-interface ExportDialogState {
-  connectionId: string
-  database: string
-  table: string
-}
-
-interface StickyDatabaseContext {
-  connectionName: string
-  database: string
-}
+import { SidebarOverlays } from './SidebarOverlays'
+import { SidebarTree } from './SidebarTree'
+import type {
+  CreateSQLDialogState,
+  DatabaseRowRefEntry,
+  ExportDialogState,
+  NodeState,
+  RenameDialogState,
+  StickyDatabaseContext,
+  TableMenuState
+} from './sidebar-types'
 
 const SIDEBAR_WIDTH_STORAGE_KEY = 'mysql-compare:sidebar-width'
 const DEFAULT_SIDEBAR_WIDTH = 288
@@ -109,7 +60,7 @@ export function Sidebar() {
   const [stickyDatabase, setStickyDatabase] = useState<StickyDatabaseContext | null>(null)
   const [sidebarWidth, setSidebarWidth] = useState(() => loadStoredSidebarWidth())
   const treeScrollRef = useRef<HTMLDivElement | null>(null)
-  const dbRowRefs = useRef<Record<string, { element: HTMLDivElement | null; connectionName: string; database: string }>>({})
+  const dbRowRefs = useRef<Record<string, DatabaseRowRefEntry>>({})
   const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
 
   useEffect(() => {
@@ -485,168 +436,27 @@ export function Sidebar() {
         className="relative shrink-0 border-r border-border bg-card flex flex-col"
         style={{ width: sidebarWidth }}
       >
-        <div className="p-2 border-b border-border space-y-2">
-          <div className="flex gap-1">
-            <div className="relative flex-1">
-              <Search className="w-3.5 h-3.5 absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-              <Input
-                value={keyword}
-                onChange={(e) => setKeyword(e.target.value)}
-                placeholder="Search connection"
-                className="pl-7 h-8"
-              />
-            </div>
-            <Button size="icon" variant="outline" onClick={() => setCreating(true)} title="New connection">
-              <Plus className="w-4 h-4" />
-            </Button>
-          </div>
-        </div>
-
-        <div ref={treeScrollRef} className="relative flex-1 overflow-auto py-1 text-sm">
-          {stickyDatabase && (
-            <div className="pointer-events-none sticky top-0 z-20 mx-2 mb-1 rounded-md border border-border bg-card/95 px-3 py-1.5 shadow-sm backdrop-blur">
-              <div className="truncate text-[10px] text-muted-foreground">{stickyDatabase.connectionName}</div>
-              <div className="truncate text-xs font-medium">{stickyDatabase.database}</div>
-            </div>
-          )}
-          {filtered.length === 0 && (
-            <div className="text-xs text-muted-foreground px-3 py-4">No connection.</div>
-          )}
-          {filtered.map((conn) => {
-            const node = nodes[conn.id]
-            return (
-              <div key={conn.id}>
-                <div className="group flex items-center px-2 py-1 hover:bg-accent cursor-pointer">
-                  <button onClick={() => toggleConnection(conn)} className="flex-1 flex items-center gap-1 text-left">
-                    {node?.expanded ? (
-                      <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                    ) : (
-                      <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                    )}
-                    <Database className="w-3.5 h-3.5 text-sky-400" />
-                    <span className="truncate">{conn.name}</span>
-                    {conn.useSSH && <span className="text-[9px] text-amber-400 ml-1">SSH</span>}
-                  </button>
-                  <div className="opacity-0 group-hover:opacity-100 flex">
-                    <button onClick={() => setEditing(conn)} className="p-1 text-muted-foreground hover:text-foreground" title="Edit">
-                      <Pencil className="w-3 h-3" />
-                    </button>
-                    <button onClick={() => onDelete(conn)} className="p-1 text-muted-foreground hover:text-destructive" title="Delete">
-                      <Trash2 className="w-3 h-3" />
-                    </button>
-                  </div>
-                </div>
-
-                {node?.expanded && (
-                  <div className="pl-4">
-                    {node.loading && <div className="text-xs text-muted-foreground px-2 py-1">Loading...</div>}
-                    {node.databases?.map((db) => {
-                      const dbExpanded = node.expandedDbs.has(db)
-                      return (
-                        <div key={db}>
-                          <div
-                            ref={(element) => {
-                              const key = `${conn.id}:${db}`
-                              if (!element) {
-                                delete dbRowRefs.current[key]
-                                return
-                              }
-                              dbRowRefs.current[key] = {
-                                element,
-                                connectionName: conn.name,
-                                database: db
-                              }
-                            }}
-                            className={cn(
-                              'flex items-center px-2 py-1 hover:bg-accent cursor-pointer'
-                            )}
-                            onClick={() => toggleDatabase(conn, db)}
-                          >
-                            {dbExpanded ? (
-                              <ChevronDown className="w-3.5 h-3.5 text-muted-foreground" />
-                            ) : (
-                              <ChevronRight className="w-3.5 h-3.5 text-muted-foreground" />
-                            )}
-                            <Database className="w-3 h-3 text-emerald-400 mx-1" />
-                            <span className="truncate flex-1">{db}</span>
-                            {dbExpanded && (
-                              <div className="flex items-center">
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    openSQLConsole(conn, db)
-                                  }}
-                                  className="p-1 text-muted-foreground hover:text-foreground"
-                                  title={`Open SQL console for ${db}`}
-                                >
-                                  <FileCode2 className="w-3 h-3" />
-                                </button>
-                                <button
-                                  onClick={(e) => {
-                                    e.stopPropagation()
-                                    refreshDatabase(conn, db)
-                                  }}
-                                  className="p-1 text-muted-foreground hover:text-foreground"
-                                  title="Refresh"
-                                >
-                                  <RefreshCw className="w-3 h-3" />
-                                </button>
-                              </div>
-                            )}
-                          </div>
-                          {dbExpanded && (
-                            <div className="pl-5">
-                              <Input
-                                value={getTableFilter(conn.id, db)}
-                                onChange={(e) => setTableFilter(conn.id, db, e.target.value)}
-                                placeholder="Filter tables"
-                                className="h-6 text-xs my-1"
-                              />
-                              {(node.tables[db] || [])
-                                .filter((table) => {
-                                  const filter = getTableFilter(conn.id, db)
-                                  return !filter || table.toLowerCase().includes(filter.toLowerCase())
-                                })
-                                .map((table) => (
-                                  <div
-                                    key={table}
-                                    className={cn(
-                                      'flex items-center px-2 py-0.5 hover:bg-accent cursor-pointer rounded',
-                                      isSelectedTable(conn.id, db, table) && 'bg-accent'
-                                    )}
-                                    onClick={() => onSelectTable(conn, db, table)}
-                                    onContextMenu={(event) => openTableMenu(event, conn, db, table)}
-                                    title="Right click for table actions"
-                                  >
-                                    <TableIcon className="w-3 h-3 text-muted-foreground mr-1" />
-                                    <span className="truncate text-xs flex-1">{table}</span>
-                                  </div>
-                                ))}
-                            </div>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
-                )}
-              </div>
-            )
-          })}
-        </div>
-
-        {(creating || editing) && (
-          <ConnectionDialog
-            open
-            connection={editing}
-            onOpenChange={(open) => {
-              if (!open) {
-                setCreating(false)
-                setEditing(null)
-              }
-            }}
-            onSaved={() => refresh()}
-          />
-        )}
+        <SidebarTree
+          keyword={keyword}
+          onKeywordChange={setKeyword}
+          onCreateConnection={() => setCreating(true)}
+          filteredConnections={filtered}
+          nodes={nodes}
+          stickyDatabase={stickyDatabase}
+          treeScrollRef={treeScrollRef}
+          dbRowRefs={dbRowRefs}
+          getTableFilter={getTableFilter}
+          isSelectedTable={isSelectedTable}
+          onToggleConnection={toggleConnection}
+          onEditConnection={setEditing}
+          onDeleteConnection={onDelete}
+          onToggleDatabase={toggleDatabase}
+          onOpenSQLConsole={openSQLConsole}
+          onRefreshDatabase={refreshDatabase}
+          onTableFilterChange={setTableFilter}
+          onSelectTable={onSelectTable}
+          onOpenTableMenu={openTableMenu}
+        />
 
         <div
           role="separator"
@@ -662,145 +472,44 @@ export function Sidebar() {
         />
       </div>
 
-      {tableMenu && (
-        <div className="fixed inset-0 z-[80]" onClick={() => setTableMenu(null)}>
-          <div
-            className="absolute w-56 rounded-md border border-border bg-card p-1 shadow-xl"
-            style={{ left: tableMenu.x, top: tableMenu.y }}
-            onClick={(event) => event.stopPropagation()}
-          >
-            <TableMenuItem
-              icon={<Pencil className="w-3.5 h-3.5" />}
-              label="Rename Table"
-              onClick={() => openRenameDialog(tableMenu)}
-            />
-            <TableMenuItem
-              icon={<Copy className="w-3.5 h-3.5" />}
-              label={`Copy to ${tableMenu.table}_copy`}
-              onClick={() => copyTable(tableMenu)}
-            />
-            <TableMenuItem
-              icon={<FileCode2 className="w-3.5 h-3.5" />}
-              label="Show CREATE TABLE"
-              onClick={() => showCreateSQL(tableMenu)}
-            />
-            <TableMenuItem
-              icon={<Download className="w-3.5 h-3.5" />}
-              label="Export..."
-              onClick={() => openExportDialog(tableMenu)}
-            />
-            <div className="my-1 h-px bg-border" />
-            <TableMenuItem
-              icon={<Trash2 className="w-3.5 h-3.5" />}
-              label="Drop Table"
-              onClick={() => dropTable(tableMenu)}
-              danger
-            />
-          </div>
-        </div>
-      )}
-
-      {renameDialog && (
-        <Dialog
-          open
-          onOpenChange={(open) => {
-            if (!open && !actionBusy) setRenameDialog(null)
-          }}
-          title="Rename Table"
-          description={`Rename ${renameDialog.database}.${renameDialog.table} to a new table name.`}
-          className="max-w-md"
-          footer={
-            <>
-              <Button variant="outline" onClick={() => setRenameDialog(null)} disabled={actionBusy}>
-                Cancel
-              </Button>
-              <Button onClick={submitRename} disabled={actionBusy || !renameDraft.trim()}>
-                Rename
-              </Button>
-            </>
+      <SidebarOverlays
+        creating={creating}
+        editing={editing}
+        onConnectionDialogOpenChange={(open) => {
+          if (!open) {
+            setCreating(false)
+            setEditing(null)
           }
-        >
-          <div className="space-y-2">
-            <Label className="block">New Table Name</Label>
-            <Input value={renameDraft} onChange={(e) => setRenameDraft(e.target.value)} />
-          </div>
-        </Dialog>
-      )}
-
-      {createSQLDialog && (
-        <Dialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setCreateSQLDialog(null)
-          }}
-          title="CREATE TABLE"
-          description={createSQLDialog.title}
-          className="max-w-4xl"
-          footer={
-            <>
-              <Button variant="outline" onClick={() => setCreateSQLDialog(null)}>
-                Close
-              </Button>
-              <Button
-                onClick={() => {
-                  navigator.clipboard.writeText(createSQLDialog.sql)
-                  showToast('SQL copied', 'success')
-                }}
-                disabled={createSQLDialog.loading || !createSQLDialog.sql}
-              >
-                Copy SQL
-              </Button>
-            </>
-          }
-        >
-          {createSQLDialog.loading ? (
-            <div className="text-sm text-muted-foreground">Loading...</div>
-          ) : (
-            <pre className="max-h-[60vh] overflow-auto rounded border border-border bg-card p-3 text-xs whitespace-pre-wrap">
-              {createSQLDialog.sql}
-            </pre>
-          )}
-        </Dialog>
-      )}
-
-      {exportDialog && (
-        <ExportTableDialog
-          open
-          onOpenChange={(open) => {
-            if (!open) setExportDialog(null)
-          }}
-          connectionId={exportDialog.connectionId}
-          database={exportDialog.database}
-          table={exportDialog.table}
-          availableScopes={['all']}
-        />
-      )}
+        }}
+        onConnectionSaved={refresh}
+        tableMenu={tableMenu}
+        onCloseTableMenu={() => setTableMenu(null)}
+        onRenameTable={openRenameDialog}
+        onCopyTable={copyTable}
+        onShowCreateSQL={showCreateSQL}
+        onExportTable={openExportDialog}
+        onDropTable={dropTable}
+        renameDialog={renameDialog}
+        renameDraft={renameDraft}
+        actionBusy={actionBusy}
+        onRenameDraftChange={setRenameDraft}
+        onRenameDialogOpenChange={(open) => {
+          if (!open && !actionBusy) setRenameDialog(null)
+        }}
+        onSubmitRename={submitRename}
+        createSQLDialog={createSQLDialog}
+        onCreateSQLDialogOpenChange={(open) => {
+          if (!open) setCreateSQLDialog(null)
+        }}
+        onCopyCreateSQL={() => {
+          navigator.clipboard.writeText(createSQLDialog?.sql ?? '')
+          showToast('SQL copied', 'success')
+        }}
+        exportDialog={exportDialog}
+        onExportDialogOpenChange={(open) => {
+          if (!open) setExportDialog(null)
+        }}
+      />
     </>
-  )
-}
-
-function TableMenuItem({
-  icon,
-  label,
-  onClick,
-  danger = false
-}: {
-  icon: React.ReactNode
-  label: string
-  onClick: () => void
-  danger?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      className={cn(
-        'flex w-full items-center gap-2 rounded px-2 py-1.5 text-left text-sm hover:bg-accent',
-        danger && 'text-red-300 hover:bg-red-500/10'
-      )}
-      onClick={onClick}
-    >
-      <span className="text-muted-foreground">{icon}</span>
-      <span>{label}</span>
-    </button>
   )
 }

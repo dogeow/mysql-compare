@@ -1,0 +1,138 @@
+import type { DatabaseDiff } from '../../../shared/types'
+import type { ComparePhase } from './diff-panel-formatters'
+import { EmptyResultState } from './diff-panel-presentation'
+import { RowComparisonSection } from './RowComparisonSection'
+import { SchemaTabContent, StatusTabContent, TablesTabContent } from './DiffResultTabs'
+import type { DiffResultTab, TableCompareEntry, TableStatusFilter } from './diff-panel-utils'
+
+interface DiffPanelResultBodyProps {
+  resultTab: DiffResultTab
+  compareData: boolean
+  comparePhase: ComparePhase
+  diff: DatabaseDiff | null
+  sourceTables: string[]
+  targetTables: string[]
+  sharedTableCount: number
+  comparisonEntries: TableCompareEntry[]
+  prioritizedComparisonEntries: TableCompareEntry[]
+  filteredComparisonEntries: TableCompareEntry[]
+  completedSharedTableCount: number
+  pendingSharedTable?: string
+  hasCompareErrors: boolean
+  statusFilter: TableStatusFilter
+  tableSearchQuery: string
+  selectedComparisonTable: string | null
+  visibleSchemaDiffs: DatabaseDiff['tableDiffs']
+  hasRowComparisonResults: boolean
+  showAllRowComparisons: boolean
+  onToggleShowAllRowComparisons: () => void
+  onSelectComparisonTable: (table: string | null) => void
+  onSearchChange: (value: string) => void
+  onClearSearch: () => void
+  onStatusFilterChange: (value: TableStatusFilter) => void
+  onOpenCompare: (table: string) => void
+  onOpenSource: (table: string) => void
+  onOpenTarget: (table: string) => void
+}
+
+export function DiffPanelResultBody({
+  resultTab,
+  compareData,
+  comparePhase,
+  diff,
+  sourceTables,
+  targetTables,
+  sharedTableCount,
+  comparisonEntries,
+  prioritizedComparisonEntries,
+  filteredComparisonEntries,
+  completedSharedTableCount,
+  pendingSharedTable,
+  hasCompareErrors,
+  statusFilter,
+  tableSearchQuery,
+  selectedComparisonTable,
+  visibleSchemaDiffs,
+  hasRowComparisonResults,
+  showAllRowComparisons,
+  onToggleShowAllRowComparisons,
+  onSelectComparisonTable,
+  onSearchChange,
+  onClearSearch,
+  onStatusFilterChange,
+  onOpenCompare,
+  onOpenSource,
+  onOpenTarget
+}: DiffPanelResultBodyProps) {
+  if (resultTab === 'tables') {
+    return (
+      <TablesTabContent
+        sourceTables={sourceTables}
+        targetTables={targetTables}
+        sharedTableCount={sharedTableCount}
+        phase={comparePhase}
+      />
+    )
+  }
+
+  if (resultTab === 'status') {
+    return (
+      <StatusTabContent
+        comparisonEntries={comparisonEntries}
+        prioritizedComparisonEntries={prioritizedComparisonEntries}
+        filteredComparisonEntries={filteredComparisonEntries}
+        sharedTableCount={sharedTableCount}
+        completedSharedTableCount={completedSharedTableCount}
+        pendingSharedTable={pendingSharedTable}
+        hasCompareErrors={hasCompareErrors}
+        comparePhase={comparePhase}
+        statusFilter={statusFilter}
+        tableSearchQuery={tableSearchQuery}
+        selectedComparisonTable={selectedComparisonTable}
+        onSelectTable={onSelectComparisonTable}
+        onSearchChange={onSearchChange}
+        onClearSearch={onClearSearch}
+        onStatusFilterChange={onStatusFilterChange}
+        onOpenCompare={onOpenCompare}
+        onOpenSource={onOpenSource}
+        onOpenTarget={onOpenTarget}
+      />
+    )
+  }
+
+  if (resultTab === 'schema') {
+    return (
+      <SchemaTabContent
+        schemaDiffs={visibleSchemaDiffs}
+        hasRowComparisonResults={hasRowComparisonResults}
+        onOpenCompare={onOpenCompare}
+        onOpenSource={onOpenSource}
+        onOpenTarget={onOpenTarget}
+      />
+    )
+  }
+
+  if (hasRowComparisonResults && diff) {
+    return (
+      <RowComparisonSection
+        rowComparisons={diff.rowComparisons}
+        showAll={showAllRowComparisons}
+        onToggleShowAll={onToggleShowAllRowComparisons}
+        onOpenCompare={onOpenCompare}
+        onOpenSource={onOpenSource}
+        onOpenTarget={onOpenTarget}
+      />
+    )
+  }
+
+  return (
+    <EmptyResultState
+      title="No content comparison results"
+      description={
+        compareData
+          ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
+          : 'Enable Compare rows before running Compare to inspect row-level changes here.'
+      }
+    />
+  )
+}

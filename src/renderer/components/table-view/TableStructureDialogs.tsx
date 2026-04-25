@@ -1,0 +1,284 @@
+import type { Dispatch, SetStateAction } from 'react'
+import { Copy } from 'lucide-react'
+import { Badge } from '@renderer/components/ui/badge'
+import { Button } from '@renderer/components/ui/button'
+import { Checkbox } from '@renderer/components/ui/checkbox'
+import { Dialog } from '@renderer/components/ui/dialog'
+import { Input } from '@renderer/components/ui/input'
+import { Label } from '@renderer/components/ui/label'
+import type { ColumnInfo } from '../../../shared/types'
+import type { ColumnDraft, IndexDraft, PendingAction } from './table-structure-types'
+
+interface TableStructureDialogsProps {
+  database: string
+  table: string
+  busy: boolean
+  columns: ColumnInfo[]
+  editingColumn: ColumnDraft | null
+  setEditingColumn: Dispatch<SetStateAction<ColumnDraft | null>>
+  onReviewColumnSQL: () => void
+  editingIndex: IndexDraft | null
+  setEditingIndex: Dispatch<SetStateAction<IndexDraft | null>>
+  onReviewIndexSQL: () => void
+  pendingAction: PendingAction | null
+  onClosePendingAction: () => void
+  onCopyPendingSQL: () => void
+  onExecutePendingAction: () => void | Promise<void>
+}
+
+export function TableStructureDialogs({
+  database,
+  table,
+  busy,
+  columns,
+  editingColumn,
+  setEditingColumn,
+  onReviewColumnSQL,
+  editingIndex,
+  setEditingIndex,
+  onReviewIndexSQL,
+  pendingAction,
+  onClosePendingAction,
+  onCopyPendingSQL,
+  onExecutePendingAction
+}: TableStructureDialogsProps) {
+  return (
+    <>
+      {editingColumn && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) {
+              setEditingColumn(null)
+            }
+          }}
+          title="Edit Column"
+          description={`${database}.${table}.${editingColumn.originalName}`}
+          className="max-w-2xl"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setEditingColumn(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button onClick={onReviewColumnSQL} disabled={busy}>
+                Review SQL
+              </Button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="mb-1 block">Column Name</Label>
+              <Input
+                value={editingColumn.name}
+                onChange={(event) =>
+                  setEditingColumn((current) =>
+                    current ? { ...current, name: event.target.value } : current
+                  )
+                }
+              />
+            </div>
+            <div>
+              <Label className="mb-1 block">Type</Label>
+              <Input
+                value={editingColumn.type}
+                onChange={(event) =>
+                  setEditingColumn((current) =>
+                    current ? { ...current, type: event.target.value } : current
+                  )
+                }
+              />
+            </div>
+            <div className="col-span-2 flex items-center gap-4 pt-1 text-sm">
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={editingColumn.nullable}
+                  onChange={(event) =>
+                    setEditingColumn((current) =>
+                      current ? { ...current, nullable: event.target.checked } : current
+                    )
+                  }
+                />
+                Nullable
+              </label>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={editingColumn.useDefault}
+                  onChange={(event) =>
+                    setEditingColumn((current) =>
+                      current ? { ...current, useDefault: event.target.checked } : current
+                    )
+                  }
+                />
+                Set Default
+              </label>
+              {editingColumn.isAutoIncrement && <Badge variant="info">AUTO_INCREMENT preserved</Badge>}
+            </div>
+            <div className="col-span-2">
+              <Label className="mb-1 block">Default Value</Label>
+              <Input
+                value={editingColumn.defaultValue}
+                onChange={(event) =>
+                  setEditingColumn((current) =>
+                    current ? { ...current, defaultValue: event.target.value } : current
+                  )
+                }
+                disabled={!editingColumn.useDefault}
+                placeholder="Leave empty with Set Default on to write DEFAULT NULL"
+              />
+            </div>
+            <div className="col-span-2">
+              <Label className="mb-1 block">Comment</Label>
+              <Input
+                value={editingColumn.comment}
+                onChange={(event) =>
+                  setEditingColumn((current) =>
+                    current ? { ...current, comment: event.target.value } : current
+                  )
+                }
+              />
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {editingIndex && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) {
+              setEditingIndex(null)
+            }
+          }}
+          title={editingIndex.mode === 'add' ? 'Add Index' : 'Edit Index'}
+          description={`${database}.${table}`}
+          className="max-w-2xl"
+          footer={
+            <>
+              <Button variant="outline" onClick={() => setEditingIndex(null)} disabled={busy}>
+                Cancel
+              </Button>
+              <Button onClick={onReviewIndexSQL} disabled={busy}>
+                Review SQL
+              </Button>
+            </>
+          }
+        >
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <Label className="mb-1 block">Index Name</Label>
+              <Input
+                value={editingIndex.name}
+                onChange={(event) =>
+                  setEditingIndex((current) =>
+                    current ? { ...current, name: event.target.value } : current
+                  )
+                }
+                disabled={editingIndex.primary}
+                placeholder={editingIndex.primary ? 'PRIMARY' : 'idx_example'}
+              />
+            </div>
+            <div>
+              <Label className="mb-1 block">Index Type</Label>
+              <Input
+                value={editingIndex.type}
+                onChange={(event) =>
+                  setEditingIndex((current) =>
+                    current ? { ...current, type: event.target.value.toUpperCase() } : current
+                  )
+                }
+                disabled={editingIndex.primary}
+                placeholder="BTREE"
+              />
+            </div>
+            <div className="col-span-2 flex items-center gap-4 pt-1 text-sm">
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={editingIndex.primary}
+                  onChange={(event) =>
+                    setEditingIndex((current) => {
+                      if (!current) return current
+                      const primary = event.target.checked
+                      return {
+                        ...current,
+                        primary,
+                        unique: primary ? true : current.unique,
+                        name: primary ? 'PRIMARY' : current.originalName === 'PRIMARY' ? '' : current.name
+                      }
+                    })
+                  }
+                />
+                Primary key
+              </label>
+              <label className="flex items-center gap-2">
+                <Checkbox
+                  checked={editingIndex.unique || editingIndex.primary}
+                  onChange={(event) =>
+                    setEditingIndex((current) =>
+                      current && !current.primary
+                        ? { ...current, unique: event.target.checked }
+                        : current
+                    )
+                  }
+                  disabled={editingIndex.primary}
+                />
+                Unique
+              </label>
+            </div>
+            <div className="col-span-2 space-y-2">
+              <Label className="block">Columns</Label>
+              <div className="grid max-h-48 grid-cols-2 gap-2 overflow-auto rounded border border-border p-3 text-sm">
+                {columns.map((column) => (
+                  <label key={column.name} className="flex items-center gap-2">
+                    <Checkbox
+                      checked={editingIndex.columns.includes(column.name)}
+                      onChange={(event) =>
+                        setEditingIndex((current) => {
+                          if (!current) return current
+                          const nextColumns = event.target.checked
+                            ? [...current.columns, column.name]
+                            : current.columns.filter((name) => name !== column.name)
+                          return { ...current, columns: nextColumns }
+                        })
+                      }
+                    />
+                    {column.name}
+                  </label>
+                ))}
+              </div>
+            </div>
+          </div>
+        </Dialog>
+      )}
+
+      {pendingAction && (
+        <Dialog
+          open
+          onOpenChange={(open) => {
+            if (!open && !busy) onClosePendingAction()
+          }}
+          title={pendingAction.title}
+          description={pendingAction.description}
+          className="max-w-3xl"
+          footer={
+            <>
+              <Button variant="outline" onClick={onClosePendingAction} disabled={busy}>
+                Back
+              </Button>
+              <Button variant="outline" onClick={onCopyPendingSQL} disabled={busy}>
+                <Copy className="h-3 w-3" /> Copy SQL
+              </Button>
+              <Button onClick={onExecutePendingAction} disabled={busy}>
+                {busy ? 'Executing...' : 'Confirm & Execute'}
+              </Button>
+            </>
+          }
+        >
+          <pre className="max-h-[60vh] overflow-auto rounded border border-border bg-card p-3 text-xs whitespace-pre-wrap break-all">
+            {pendingAction.sql}
+          </pre>
+        </Dialog>
+      )}
+    </>
+  )
+}

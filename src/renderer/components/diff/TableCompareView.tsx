@@ -1,16 +1,14 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type Ref, type SetStateAction, type UIEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type UIEvent } from 'react'
 import { ArrowRight, RefreshCw } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
-import { Checkbox } from '@renderer/components/ui/checkbox'
-import { Table, TBody, Td, THead, Th, Tr } from '@renderer/components/ui/table'
-import { cn, formatCellValue } from '@renderer/lib/utils'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
-import type { ColumnInfo, QueryRowsResult } from '../../../shared/types'
+import type { QueryRowsResult } from '../../../shared/types'
 import { getRowDiffNavigation } from './diff-panel-utils'
 import { buildCopyValues, buildRowKey } from './table-compare-utils'
+import { TableComparePane } from './TableComparePane'
 
 interface Props {
   compareSessionId: string
@@ -273,14 +271,14 @@ export function TableCompareView({
   const syncPaneScroll = (side: 'source' | 'target', event: UIEvent<HTMLDivElement>) => {
     if (syncingScrollRef.current) return
 
-    const sourceElement = side === 'source' ? event.currentTarget : sourceScrollRef.current
-    const targetElement = side === 'source' ? targetScrollRef.current : event.currentTarget
+    const activeElement = event.currentTarget
+    const peerElement = side === 'source' ? targetScrollRef.current : sourceScrollRef.current
 
-    if (!sourceElement || !targetElement) return
+    if (!peerElement) return
 
     syncingScrollRef.current = true
-    targetElement.scrollTop = sourceElement.scrollTop
-    targetElement.scrollLeft = sourceElement.scrollLeft
+    peerElement.scrollTop = activeElement.scrollTop
+    peerElement.scrollLeft = activeElement.scrollLeft
 
     if (syncScrollFrameRef.current !== null) {
       cancelAnimationFrame(syncScrollFrameRef.current)
@@ -402,7 +400,9 @@ export function TableCompareView({
           connectionName={sourceConnectionName}
           database={sourceDatabase}
           table={table}
-          state={sourceState}
+          data={sourceState.data}
+          error={sourceState.error}
+          loading={sourceState.loading}
           scrollContainerRef={sourceScrollRef}
           onScroll={(event) => syncPaneScroll('source', event)}
           selectedKeys={selectedKeySet}
@@ -418,7 +418,9 @@ export function TableCompareView({
           connectionName={targetConnectionName}
           database={targetDatabase}
           table={table}
-          state={targetState}
+          data={targetState.data}
+          error={targetState.error}
+          loading={targetState.loading}
           scrollContainerRef={targetScrollRef}
           onScroll={(event) => syncPaneScroll('target', event)}
           leadingSpacer={sourceSelectionEnabled}
@@ -490,135 +492,4 @@ function useComparedTableData({
       }
     })()
   }, [connectionId, database, onStateChange, orderBy, page, pageSize, reloadToken, table])
-}
-
-function TableComparePane({
-  title,
-  connectionName,
-  database,
-  table,
-  state,
-  scrollContainerRef,
-  onScroll,
-  selectedKeys,
-  showSelection = false,
-  leadingSpacer = false,
-  selectionEnabled = false,
-  allVisibleSelected = false,
-  onToggleAllVisible,
-  onToggleRow
-}: {
-  title: string
-  connectionName: string
-  database: string
-  table: string
-  state: ComparedTableDataState
-  scrollContainerRef?: Ref<HTMLDivElement>
-  onScroll?: (event: UIEvent<HTMLDivElement>) => void
-  selectedKeys?: Set<string>
-  showSelection?: boolean
-  leadingSpacer?: boolean
-  selectionEnabled?: boolean
-  allVisibleSelected?: boolean
-  onToggleAllVisible?: () => void
-  onToggleRow?: (row: Record<string, unknown>) => void
-}) {
-  const tableData = state.data
-
-  return (
-    <div className="flex min-h-0 flex-col overflow-hidden rounded border border-border bg-card/40">
-      <div className="border-b border-border/60 px-3 py-2">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="text-xs text-muted-foreground">{title}</div>
-            <div className="truncate text-sm font-medium">{connectionName}</div>
-            <div className="truncate text-xs text-muted-foreground">
-              {database} / {table}
-            </div>
-          </div>
-          {state.data && (
-            <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-              <div>{state.data.total.toLocaleString()} rows</div>
-              <div>
-                {state.data.hasPrimaryKey
-                  ? `PK: ${state.data.primaryKey.join(', ')}`
-                  : 'No primary key'}
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
-
-      <div ref={scrollContainerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
-        {state.loading && <div className="p-3 text-xs text-muted-foreground">Loading rows...</div>}
-        {!state.loading && state.error && (
-          <div className="p-3 text-xs text-red-300 break-all">{state.error}</div>
-        )}
-        {!state.loading && !state.error && tableData && tableData.rows.length === 0 && (
-          <div className="p-3 text-xs text-muted-foreground">No rows found on this page.</div>
-        )}
-        {tableData && tableData.rows.length > 0 && (
-          <Table>
-            <THead>
-              <Tr>
-                {(showSelection || leadingSpacer) && (
-                  <Th className="w-8">
-                    {showSelection && (
-                      <Checkbox
-                        checked={allVisibleSelected}
-                        onChange={() => onToggleAllVisible?.()}
-                        disabled={!selectionEnabled}
-                      />
-                    )}
-                  </Th>
-                )}
-                {tableData.columns.map((column) => (
-                  <Th key={column.name}>
-                    <div className="flex items-center gap-1">
-                      {column.isPrimaryKey && <Badge variant="warning">PK</Badge>}
-                      <span>{column.name}</span>
-                      <span className="text-[10px] text-muted-foreground">{column.type}</span>
-                    </div>
-                  </Th>
-                ))}
-              </Tr>
-            </THead>
-            <TBody>
-              {tableData.rows.map((row, index) => {
-                const rowKey = buildRowKey(row, tableData.primaryKey) ?? `${title}-${index}`
-                const selected = selectedKeys?.has(rowKey) ?? false
-
-                return (
-                  <Tr key={rowKey} className={cn(selected && 'bg-accent/30')}>
-                    {(showSelection || leadingSpacer) && (
-                      <Td>
-                        {showSelection && (
-                          <Checkbox
-                            checked={selected}
-                            onChange={() => onToggleRow?.(row)}
-                            disabled={!selectionEnabled}
-                          />
-                        )}
-                      </Td>
-                    )}
-                    {tableData.columns.map((column) => (
-                      <Td key={column.name} title={renderCellValue(row[column.name], column)}>
-                        {renderCellValue(row[column.name], column)}
-                      </Td>
-                    ))}
-                  </Tr>
-                )
-              })}
-            </TBody>
-          </Table>
-        )}
-      </div>
-    </div>
-  )
-}
-
-function renderCellValue(value: unknown, column: ColumnInfo): string {
-  if (value === null || value === undefined) return 'NULL'
-  if (column.type === 'tinyint(1)') return value ? '✓' : '✗'
-  return formatCellValue(value)
 }

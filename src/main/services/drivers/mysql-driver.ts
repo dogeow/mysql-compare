@@ -15,45 +15,18 @@ import type {
 } from '../../../shared/types'
 import type { DbDriver, Dialect, StreamRowsOptions } from './types'
 import { buildMySQLOrderClause, mysqlDialect } from './mysql-dialect'
+import { MySQLPoolCache, type MySQLDriverPoolDebugSnapshot } from './mysql-pool-cache'
+
+export type { MySQLDriverPoolDebugSnapshot } from './mysql-pool-cache'
 
 const MAX_PAGE_SIZE = 1000
-const MAX_CACHED_DATABASE_POOLS = 8
-
-interface PoolEntry {
-  pool: Pool
-  activeUsers: number
-}
-
-interface PoolDebugStats {
-  createdPools: number
-  reusedPools: number
-  evictedPools: number
-  skippedEvictions: number
-}
-
-export interface MySQLDriverPoolDebugSnapshot {
-  connectionId: string
-  cachedPools: number
-  maxCachedPools: number
-  stats: PoolDebugStats
-  entries: Array<{
-    database: string
-    activeUsers: number
-  }>
-}
 
 export class MySQLDriver implements DbDriver {
   readonly engine = 'mysql' as const
   readonly dialect: Dialect = mysqlDialect
   readonly connectionId: string
 
-  private pools = new Map<string, PoolEntry>()
-  private readonly poolDebugStats: PoolDebugStats = {
-    createdPools: 0,
-    reusedPools: 0,
-    evictedPools: 0,
-    skippedEvictions: 0
-  }
+  private readonly poolCache: MySQLPoolCache
   private readonly connection: ConnectionConfig
   private readonly localPort: number | undefined
 
@@ -61,102 +34,15 @@ export class MySQLDriver implements DbDriver {
     this.connection = params.connection
     this.localPort = params.localPort
     this.connectionId = params.connection.id
-  }
-
-  private buildPoolOptions(database?: string): PoolOptions {
-    const host = this.localPort !== undefined ? '127.0.0.1' : this.connection.host
-    const port = this.localPort ?? this.connection.port
-    return {
-      host,
-      port,
-      user: this.connection.username,
-      password: this.connection.password,
-      database: database || this.connection.database,
-      connectionLimit: 5,
-      waitForConnections: true,
-      multipleStatements: false,
-      dateStrings: true
-    }
-  }
-
-  private async acquirePool(database?: string): Promise<{ pool: Pool; release: () => void }> {
-    const key = database ?? this.connection.database ?? '__default__'
-    const cached = this.pools.get(key)
-    if (cached) {
-      this.poolDebugStats.reusedPools += 1
-      this.touchPool(key, cached)
-      cached.activeUsers += 1
-      return this.createLease(cached)
-    }
-
-    await this.evictIdlePoolsIfNeeded()
-
-    const entry: PoolEntry = {
-      pool: mysql.createPool(this.buildPoolOptions(database)),
-      activeUsers: 1
-    }
-    this.poolDebugStats.createdPools += 1
-    this.pools.set(key, entry)
-    return this.createLease(entry)
+    this.poolCache = new MySQLPoolCache(this.connectionId, this.connection, this.localPort)
   }
 
   getPoolDebugSnapshot(): MySQLDriverPoolDebugSnapshot {
-    return {
-      connectionId: this.connectionId,
-      cachedPools: this.pools.size,
-      maxCachedPools: MAX_CACHED_DATABASE_POOLS,
-      stats: { ...this.poolDebugStats },
-      entries: Array.from(this.pools.entries(), ([database, entry]) => ({
-        database,
-        activeUsers: entry.activeUsers
-      }))
-    }
-  }
-
-  private createLease(entry: PoolEntry): { pool: Pool; release: () => void } {
-    let released = false
-
-    return {
-      pool: entry.pool,
-      release: () => {
-        if (released) return
-        released = true
-        entry.activeUsers = Math.max(0, entry.activeUsers - 1)
-      }
-    }
-  }
-
-  private async withPool<T>(database: string | undefined, run: (pool: Pool) => Promise<T>): Promise<T> {
-    const lease = await this.acquirePool(database)
-    try {
-      return await run(lease.pool)
-    } finally {
-      lease.release()
-    }
-  }
-
-  private touchPool(key: string, entry: PoolEntry): void {
-    this.pools.delete(key)
-    this.pools.set(key, entry)
-  }
-
-  private async evictIdlePoolsIfNeeded(): Promise<void> {
-    while (this.pools.size >= MAX_CACHED_DATABASE_POOLS) {
-      const oldestIdle = Array.from(this.pools.entries()).find(([, entry]) => entry.activeUsers === 0)
-      if (!oldestIdle) {
-        this.poolDebugStats.skippedEvictions += 1
-        return
-      }
-
-      const [oldestKey, oldestEntry] = oldestIdle
-      this.pools.delete(oldestKey)
-      this.poolDebugStats.evictedPools += 1
-      await oldestEntry.pool.end().catch(() => undefined)
-    }
+    return this.poolCache.getDebugSnapshot()
   }
 
   async testConnection(): Promise<string> {
-    const opts = this.buildPoolOptions()
+    const opts = this.poolCache.buildPoolOptions()
     const tmp = mysql.createPool({ ...opts, connectionLimit: 1 })
     try {
       const [rows] = await tmp.query<RowDataPacket[]>('SELECT VERSION() AS v')
@@ -167,7 +53,7 @@ export class MySQLDriver implements DbDriver {
   }
 
   async listDatabases(): Promise<string[]> {
-    return this.withPool(undefined, async (pool) => {
+    return this.poolCache.withPool(undefined, async (pool) => {
       const [rows] = await pool.query<RowDataPacket[]>('SHOW DATABASES')
       return rows
         .map((r) => Object.values(r)[0] as string)
@@ -176,7 +62,7 @@ export class MySQLDriver implements DbDriver {
   }
 
   async listTables(database: string): Promise<string[]> {
-    return this.withPool(database, async (pool) => {
+    return this.poolCache.withPool(database, async (pool) => {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT TABLE_NAME FROM information_schema.TABLES
          WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'
@@ -188,7 +74,7 @@ export class MySQLDriver implements DbDriver {
   }
 
   async getTableSchema(database: string, table: string): Promise<TableSchema> {
-    return this.withPool(database, async (pool) => {
+    return this.poolCache.withPool(database, async (pool) => {
       const [colRows] = await pool.query<RowDataPacket[]>(
         `SELECT COLUMN_NAME, COLUMN_TYPE, IS_NULLABLE, COLUMN_DEFAULT,
                 COLUMN_KEY, EXTRA, COLUMN_COMMENT
@@ -273,7 +159,7 @@ export class MySQLDriver implements DbDriver {
     assertNonEmptySQL('table', req.table)
     assertSafeWhereClause(req.where)
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       const safeTable = this.dialect.quoteTable(req.database, req.table)
       const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
       const orderClause = req.orderBy
@@ -301,7 +187,7 @@ export class MySQLDriver implements DbDriver {
     assertNonEmptySQL('table', req.table)
     assertColumns(cols, 'insert')
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       const placeholders = cols.map(() => '?').join(', ')
       const sql = `INSERT INTO ${this.dialect.quoteTable(req.database, req.table)}
         (${cols.map((c) => this.dialect.quoteIdent(c)).join(', ')})
@@ -320,7 +206,7 @@ export class MySQLDriver implements DbDriver {
     assertColumns(pkCols, 'primary key')
     assertColumns(setCols, 'update')
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       const setClause = setCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(', ')
       const whereClause = pkCols.map((c) => `${this.dialect.quoteIdent(c)} = ?`).join(' AND ')
       const sql = `UPDATE ${this.dialect.quoteTable(req.database, req.table)} SET ${setClause} WHERE ${whereClause} LIMIT 1`
@@ -337,7 +223,7 @@ export class MySQLDriver implements DbDriver {
     if (req.pkRows.length === 0) return { affectedRows: 0 }
     assertNonEmptySQL('table', req.table)
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       const conn = await pool.getConnection()
       const tableName = this.dialect.quoteTable(req.database, req.table)
       try {
@@ -372,7 +258,7 @@ export class MySQLDriver implements DbDriver {
     await this.assertSourceExists(req.database, req.table)
     await this.assertTargetAbsent(req.database, nextName)
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       await pool.query(
         `RENAME TABLE ${this.dialect.quoteTable(req.database, req.table)} TO ${this.dialect.quoteTable(req.database, nextName)}`
       )
@@ -387,7 +273,7 @@ export class MySQLDriver implements DbDriver {
     await this.assertSourceExists(req.database, req.table)
     await this.assertTargetAbsent(req.database, targetTable)
 
-    return this.withPool(req.database, async (pool) => {
+    return this.poolCache.withPool(req.database, async (pool) => {
       const sourceName = this.dialect.quoteTable(req.database, req.table)
       const nextName = this.dialect.quoteTable(req.database, targetTable)
       let created = false
@@ -407,14 +293,14 @@ export class MySQLDriver implements DbDriver {
 
   async dropTable(req: DropTableRequest): Promise<void> {
     await this.assertSourceExists(req.database, req.table)
-    await this.withPool(req.database, async (pool) => {
+    await this.poolCache.withPool(req.database, async (pool) => {
       await pool.query(`DROP TABLE ${this.dialect.quoteTable(req.database, req.table)}`)
     })
   }
 
   async executeSQL(sql: string, database?: string): Promise<unknown> {
     if (!sql.trim()) throw new Error('SQL is required')
-    const opts = this.buildPoolOptions(database)
+    const opts = this.poolCache.buildPoolOptions(database)
     const client = await mysql.createConnection({ ...opts, multipleStatements: true })
     try {
       const [res] = await client.query(sql)
@@ -427,7 +313,7 @@ export class MySQLDriver implements DbDriver {
   async *streamRows(opts: StreamRowsOptions): AsyncGenerator<Record<string, unknown>[]> {
     if (opts.columns.length === 0) return
 
-    const lease = await this.acquirePool(opts.database)
+    const lease = await this.poolCache.acquirePool(opts.database)
     try {
       const tableName = this.dialect.quoteTable(opts.database, opts.table)
       const columnList = opts.columns.map((c) => this.dialect.quoteIdent(c)).join(', ')
@@ -458,15 +344,11 @@ export class MySQLDriver implements DbDriver {
   }
 
   async close(): Promise<void> {
-    if (this.pools.size === 0) return
-
-    const pools = Array.from(this.pools.values(), (entry) => entry.pool)
-    this.pools.clear()
-    await Promise.all(pools.map((pool) => pool.end().catch(() => undefined)))
+    await this.poolCache.close()
   }
 
   private async tableExists(database: string, table: string): Promise<boolean> {
-    return this.withPool(database, async (pool) => {
+    return this.poolCache.withPool(database, async (pool) => {
       const [rows] = await pool.query<RowDataPacket[]>(
         `SELECT 1 AS present
          FROM information_schema.TABLES
