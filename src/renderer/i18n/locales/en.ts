@@ -21,6 +21,7 @@ export const en = {
     insert: 'Insert',
     update: 'Update',
     export: 'Export',
+    import: 'Import',
     confirmExecute: 'Confirm & Execute',
     reviewSql: 'Review SQL',
     rename: 'Rename',
@@ -60,6 +61,7 @@ export const en = {
     confirm: {
       copyTable: 'Copy "{{table}}" and its data to "{{targetTable}}"?',
       dropTable: 'Drop table "{{table}}"? This cannot be undone.',
+      truncateTable: 'Truncate table "{{table}}"? All rows will be removed.',
       deleteConnection: 'Delete connection "{{name}}"?',
     },
     toast: {
@@ -67,6 +69,7 @@ export const en = {
       renamedTo: 'Renamed to {{table}}',
       copiedTo: 'Copied to {{table}}',
       droppedTable: 'Dropped table {{table}}',
+      truncatedTable: 'Truncated table {{table}}',
       connectionDeleted: 'Connection deleted',
     },
     overlays: {
@@ -75,6 +78,8 @@ export const en = {
       copyToCopy: 'Copy to {{table}}_copy',
       showCreateTable: 'Show CREATE TABLE',
       exportEllipsis: 'Export...',
+      importEllipsis: 'Import...',
+      truncateTable: 'Truncate Table',
       dropTable: 'Drop Table',
       newTableName: 'New Table Name',
       createTableTitle: 'CREATE TABLE',
@@ -425,6 +430,7 @@ export const en = {
       all: 'Entire table',
       filtered: 'Current filter result',
       page: 'Current page',
+      selected: 'Selected rows',
     },
     entireTable: 'Entire table',
     currentFilter: 'Current filter result',
@@ -439,6 +445,27 @@ export const en = {
     textHint:
       'Text export uses UTF-8 tab-separated values for easier pasting into editors and spreadsheets.',
     exporting: 'Exporting...',
+  },
+  importDialog: {
+    title: 'Import Table',
+    format: 'Format',
+    file: 'File',
+    sql: 'SQL',
+    csv: 'CSV',
+    text: 'Text (tab-separated)',
+    chooseFile: 'Choose File',
+    dropFileHint: 'Drop a file here, or choose one.',
+    fileRequired: 'Choose a file to import',
+    fileReadFailed: 'Failed to read import file',
+    includeHeader: 'First row contains column names',
+    emptyAsNull: 'Import empty cells as NULL',
+    sqlHint:
+      'SQL files are executed against the selected database. Use a script that matches the target engine.',
+    csvHint: 'CSV import maps file columns to the selected table and appends rows.',
+    textHint: 'Text import uses UTF-8 tab-separated values and appends rows.',
+    importedRows: 'Imported {{count}} row(s)',
+    importedStatements: 'Executed {{count}} statement(s)',
+    importing: 'Importing...',
   },
   rowEdit: {
     insertTitle: 'Insert Row',

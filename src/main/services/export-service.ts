@@ -4,6 +4,7 @@ import { BrowserWindow, dialog } from 'electron'
 import { schemaService } from './schema-service'
 import { dbService } from './db-service'
 import type { DbDriver } from './drivers/types'
+import { mysqlDialect } from './drivers/mysql-dialect'
 import { pgDialect, renderPgCreateTable } from './drivers/pg-dialect'
 import type { ColumnInfo, DbEngine, ExportSqlDialect, ExportTableRequest, ExportTableResult, TableSchema } from '../../shared/types'
 
@@ -34,7 +35,7 @@ export class ExportService {
         await appendFile(filePath, `${buildCreateTableSQL(schema, req.database, driver, sqlDialect)}\n\n`, 'utf8')
       }
       if (includeData) {
-        const targetDialect = sqlDialect === 'postgres' ? pgDialect : driver.dialect
+        const targetDialect = getTargetDialect(driver, sqlDialect)
         for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
           if (rows.length === 0) continue
           rowsExported += rows.length
@@ -79,12 +80,15 @@ export class ExportService {
     ) {
       throw new Error('Unsupported SQL export dialect')
     }
-    if (req.scope !== 'all' && req.scope !== 'filtered' && req.scope !== 'page') {
+    if (req.scope !== 'all' && req.scope !== 'filtered' && req.scope !== 'page' && req.scope !== 'selected') {
       throw new Error('Unsupported export scope')
     }
     if (req.scope === 'page') {
       if (!req.page || req.page < 1) throw new Error('Page export requires a valid page number')
       if (!req.pageSize || req.pageSize < 1) throw new Error('Page export requires page size')
+    }
+    if (req.scope === 'selected' && (!req.selectedRows || req.selectedRows.length === 0)) {
+      throw new Error('Selected export requires at least one row')
     }
   }
 
@@ -132,6 +136,15 @@ export class ExportService {
     const columnNames = columns.map((c) => c.name)
     const where = req.scope === 'all' ? undefined : req.where
 
+    if (req.scope === 'selected') {
+      yield (req.selectedRows ?? []).map((row) => {
+        const projected: Record<string, unknown> = {}
+        for (const name of columnNames) projected[name] = row[name]
+        return projected
+      })
+      return
+    }
+
     if (req.scope === 'page') {
       const pageSize = Math.max(1, req.pageSize ?? 100)
       const result = await driver.queryRows({
@@ -171,8 +184,14 @@ function resolveSqlDialect(sqlDialect: ExportSqlDialect | undefined, sourceEngin
 }
 
 function assertSqlDialectSupported(sourceEngine: DbEngine, sqlDialect: DbEngine): void {
-  if (sqlDialect === 'postgres' || sqlDialect === sourceEngine) return
+  if ((sourceEngine === 'mysql' || sourceEngine === 'postgres') && (sqlDialect === 'mysql' || sqlDialect === 'postgres')) return
   throw new Error(`Exporting ${sourceEngine} tables as ${sqlDialect} SQL is not supported`)
+}
+
+function getTargetDialect(sourceDriver: DbDriver, sqlDialect: DbEngine) {
+  if (sqlDialect === 'postgres') return pgDialect
+  if (sqlDialect === 'mysql') return mysqlDialect
+  return sourceDriver.dialect
 }
 
 function buildCreateTableSQL(
@@ -190,7 +209,90 @@ function buildCreateTableSQL(
     )
   }
 
+  if (sqlDialect === 'mysql' && sourceDriver.engine === 'postgres') {
+    return renderMySQLCreateTable(schema, database)
+  }
+
+  if (sqlDialect === 'mysql') {
+    return ensureSemicolon(
+      [
+        `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};`,
+        qualifyMySQLCreateTable(sourceDriver.dialect.stripDefiner(schema.createSQL), database, schema.name)
+      ].join('\n')
+    )
+  }
+
   return ensureSemicolon(sourceDriver.dialect.stripDefiner(schema.createSQL))
+}
+
+function renderMySQLCreateTable(schema: TableSchema, database: string): string {
+  const columnLines = schema.columns.map((column) => {
+    const type = mapTypeToMySQL(column.type)
+    const nullable = column.nullable ? 'NULL' : 'NOT NULL'
+    const autoIncrement = column.isAutoIncrement ? ' AUTO_INCREMENT' : ''
+    const defaultValue = renderMySQLDefaultValue(column.defaultValue, column.isAutoIncrement)
+    return `  ${mysqlDialect.quoteIdent(column.name)} ${type}${autoIncrement} ${nullable}${defaultValue}`
+  })
+  const primaryKey = schema.primaryKey.length
+    ? [`  PRIMARY KEY (${schema.primaryKey.map((name) => mysqlDialect.quoteIdent(name)).join(', ')})`]
+    : []
+  return ensureSemicolon([
+    `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};`,
+    `CREATE TABLE ${mysqlDialect.quoteTable(database, schema.name)} (`,
+    [...columnLines, ...primaryKey].join(',\n'),
+    ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
+  ].join('\n'))
+}
+
+function qualifyMySQLCreateTable(createSQL: string, database: string, table: string): string {
+  const trimmed = createSQL.trim()
+  if (!trimmed) return ''
+  return trimmed.replace(
+    /^CREATE\s+TABLE\s+(IF\s+NOT\s+EXISTS\s+)?(?:`[^`]+`|[^\s(.]+)(?:\.(?:`[^`]+`|[^\s(]+))?/i,
+    (_match, ifNotExists: string | undefined) => {
+      const existenceClause = ifNotExists ? ` ${ifNotExists.trim()}` : ''
+      return `CREATE TABLE${existenceClause} ${mysqlDialect.quoteTable(database, table)}`
+    }
+  )
+}
+
+function mapTypeToMySQL(type: string): string {
+  const normalized = type.toLowerCase().trim()
+  const varcharMatch = normalized.match(/^(character varying|varchar)\((\d+)\)$/)
+  if (varcharMatch) return `varchar(${varcharMatch[2]})`
+  const charMatch = normalized.match(/^character\((\d+)\)$/)
+  if (charMatch) return `char(${charMatch[1]})`
+  const numericMatch = normalized.match(/^numeric\((\d+)(?:,(\d+))?\)$/)
+  if (numericMatch) return `decimal(${numericMatch[1]}${numericMatch[2] ? `,${numericMatch[2]}` : ''})`
+  if (normalized === 'bigint' || normalized === 'bigserial') return 'bigint'
+  if (normalized === 'integer' || normalized === 'serial') return 'int'
+  if (normalized === 'smallint' || normalized === 'smallserial') return 'smallint'
+  if (normalized === 'boolean') return 'tinyint(1)'
+  if (normalized === 'double precision') return 'double'
+  if (normalized === 'real') return 'float'
+  if (normalized === 'text' || normalized === 'citext') return 'text'
+  if (normalized === 'json' || normalized === 'jsonb') return 'json'
+  if (normalized === 'bytea') return 'blob'
+  if (normalized === 'uuid') return 'char(36)'
+  if (normalized === 'date') return 'date'
+  if (normalized.startsWith('timestamp')) return 'datetime(6)'
+  if (normalized.startsWith('time')) return 'time(6)'
+  return type
+}
+
+function renderMySQLDefaultValue(defaultValue: string | null, isAutoIncrement: boolean): string {
+  if (isAutoIncrement || defaultValue === null || defaultValue === undefined) return ''
+  const normalized = defaultValue.trim()
+  if (!normalized) return ''
+  if (/^nextval\(/i.test(normalized)) return ''
+  if (/^now\(\)|^current_timestamp/i.test(normalized)) return ' DEFAULT CURRENT_TIMESTAMP'
+  if (/^null$/i.test(normalized)) return ' DEFAULT NULL'
+  if (/^true$/i.test(normalized)) return ' DEFAULT 1'
+  if (/^false$/i.test(normalized)) return ' DEFAULT 0'
+  const castMatch = normalized.match(/^'(.*)'::[\w\s.[\]]+$/)
+  if (castMatch) return ` DEFAULT ${mysqlDialect.formatLiteral(castMatch[1])}`
+  if (/^-?\d+(\.\d+)?$/.test(normalized)) return ` DEFAULT ${normalized}`
+  return ` DEFAULT ${mysqlDialect.formatLiteral(normalized)}`
 }
 
 function buildDelimitedRows(

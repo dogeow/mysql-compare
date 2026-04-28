@@ -5,14 +5,18 @@ import type {
   DropTableRequest,
   ExportTableRequest,
   ExportTableResult,
+  ImportTableRequest,
+  ImportTableResult,
   InsertRowRequest,
   QueryRowsRequest,
   QueryRowsResult,
   RenameTableRequest,
+  TruncateTableRequest,
   UpdateRowRequest
 } from '../../shared/types'
 import { dbService } from '../services/db-service'
 import { exportService } from '../services/export-service'
+import { importService } from '../services/import-service'
 import { schemaService } from '../services/schema-service'
 import { handle } from './_wrap'
 
@@ -70,9 +74,18 @@ export function registerDbIPC(): void {
     const driver = await dbService.getDriver(req.connectionId)
     return driver.dropTable(req)
   })
+  handle(IPC.TruncateTable, async (req: TruncateTableRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    const tableScope = driver.engine === 'postgres' ? 'public' : req.database
+    return driver.executeSQL(driver.dialect.renderTruncate(tableScope, req.table), req.database)
+  })
   handle(
     IPC.ExportTable,
     (req: ExportTableRequest): Promise<ExportTableResult> => exportService.exportTable(req)
+  )
+  handle(
+    IPC.ImportTable,
+    (req: ImportTableRequest): Promise<ImportTableResult> => importService.importTable(req)
   )
 
   handle(

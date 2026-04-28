@@ -26,6 +26,7 @@ interface Props {
   orderBy?: { column: string; dir: 'ASC' | 'DESC' }
   page?: number
   pageSize?: number
+  selectedRows?: Record<string, unknown>[]
   availableScopes?: ExportScope[]
 }
 
@@ -39,6 +40,7 @@ export function ExportTableDialog({
   orderBy,
   page,
   pageSize,
+  selectedRows = [],
   availableScopes = ['all', 'filtered', 'page']
 }: Props) {
   const { showToast } = useUIStore()
@@ -64,12 +66,10 @@ export function ExportTableDialog({
   )
   const sqlDialectOptions = useMemo(
     () => [
-      ...(sourceEngine === 'mysql'
-        ? [{ value: 'mysql', label: t('exportDialog.mysqlSql') } as const]
-        : []),
+      { value: 'mysql', label: t('exportDialog.mysqlSql') } as const,
       { value: 'postgres', label: t('exportDialog.postgresSql') } as const
     ],
-    [sourceEngine, t]
+    [t]
   )
 
   useEffect(() => {
@@ -101,6 +101,7 @@ export function ExportTableDialog({
       orderBy,
       page,
       pageSize,
+      selectedRows: scope === 'selected' ? selectedRows : undefined,
       includeCreateTable,
       includeData,
       includeHeaders

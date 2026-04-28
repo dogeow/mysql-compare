@@ -11,7 +11,7 @@ import { useUIStore } from '@renderer/store/ui-store'
 import { formatCellValue, pickPK } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/i18n'
 import { ExportTableDialog } from './ExportTableDialog'
-import type { ColumnInfo, QueryRowsResult } from '../../../shared/types'
+import type { ColumnInfo, ExportScope, QueryRowsResult } from '../../../shared/types'
 import { RowEditDialog } from './RowEditDialog'
 
 interface Props {
@@ -22,6 +22,9 @@ interface Props {
 
 export function TableDataView({ connectionId, database, table }: Props) {
   const { showToast } = useUIStore()
+  const tableReloadToken = useUIStore(
+    (state) => state.tableReloadTokens[`${connectionId}:${database}:${table}`] ?? 0
+  )
   const { t } = useI18n()
   const [data, setData] = useState<QueryRowsResult | null>(null)
   const [page, setPage] = useState(1)
@@ -78,11 +81,25 @@ export function TableDataView({ connectionId, database, table }: Props) {
         }
       }
     })()
-  }, [appliedWhere, connectionId, database, orderBy, page, pageSize, reloadToken, showToast, table])
+  }, [appliedWhere, connectionId, database, orderBy, page, pageSize, reloadToken, showToast, table, tableReloadToken])
 
   const totalPages = useMemo(
     () => (data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1),
     [data, pageSize]
+  )
+  const selectedRows = useMemo(
+    () =>
+      data
+        ? Array.from(selected).flatMap((index) => {
+            const row = data.rows[index]
+            return row ? [row] : []
+          })
+        : [],
+    [data, selected]
+  )
+  const exportScopes = useMemo<ExportScope[]>(
+    () => (selectedRows.length > 0 ? ['all', 'filtered', 'page', 'selected'] : ['all', 'filtered', 'page']),
+    [selectedRows.length]
   )
 
   const applyWhere = () => {
@@ -301,6 +318,8 @@ export function TableDataView({ connectionId, database, table }: Props) {
           orderBy={orderBy}
           page={page}
           pageSize={pageSize}
+          availableScopes={exportScopes}
+          selectedRows={selectedRows}
         />
       )}
     </div>

@@ -32,11 +32,13 @@ interface UIState {
   rightView: RightView
   workspaceTabs: WorkspaceTab[]
   activeTabId: string | null
+  tableReloadTokens: Record<string, number>
   setRightView: (v: RightView) => void
   setActiveTab: (tabId: string) => void
   closeTab: (tabId: string) => void
   renameTableTabs: (connectionId: string, database: string, oldTable: string, newTable: string) => void
   closeTableTabs: (connectionId: string, database: string, table: string) => void
+  refreshTableData: (connectionId: string, database: string, table: string) => void
   toast: { message: string; level: 'info' | 'error' | 'success' } | null
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
 }
@@ -64,6 +66,10 @@ function getTabId(view: WorkspaceView): string {
     return `table-compare:${view.compareSessionId}`
   }
   return `table:${view.connectionId}:${view.database}:${view.table}`
+}
+
+function getTableReloadKey(connectionId: string, database: string, table: string): string {
+  return `${connectionId}:${database}:${table}`
 }
 
 function getTabTitle(view: WorkspaceView): string {
@@ -104,6 +110,7 @@ export const useUIStore = create<UIState>((set) => ({
   rightView: { kind: 'empty' },
   workspaceTabs: [],
   activeTabId: null,
+  tableReloadTokens: {},
   setRightView: (view) =>
     set((state) => {
       if (view.kind === 'empty') {
@@ -207,6 +214,17 @@ export const useUIStore = create<UIState>((set) => ({
         return { ...state, workspaceTabs }
       }
       return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, removedActiveIndex - 1) }
+    }),
+  refreshTableData: (connectionId, database, table) =>
+    set((state) => {
+      const key = getTableReloadKey(connectionId, database, table)
+      return {
+        ...state,
+        tableReloadTokens: {
+          ...state.tableReloadTokens,
+          [key]: (state.tableReloadTokens[key] ?? 0) + 1
+        }
+      }
     }),
   toast: null,
   showToast: (message, level = 'info') => {

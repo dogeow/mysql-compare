@@ -11,6 +11,7 @@ import type {
   CreateSQLDialogState,
   DatabaseRowRefEntry,
   ExportDialogState,
+  ImportDialogState,
   NodeState,
   RenameDialogState,
   StickyDatabaseContext,
@@ -46,7 +47,7 @@ function loadStoredSidebarWidth(): number {
 
 export function Sidebar() {
   const { connections, refresh, remove } = useConnectionStore()
-  const { rightView, setRightView, renameTableTabs, closeTableTabs, showToast } = useUIStore()
+  const { rightView, setRightView, renameTableTabs, closeTableTabs, refreshTableData, showToast } = useUIStore()
   const { t } = useI18n()
   const [keyword, setKeyword] = useState('')
   const [editing, setEditing] = useState<SafeConnection | null>(null)
@@ -57,6 +58,7 @@ export function Sidebar() {
   const [renameDraft, setRenameDraft] = useState('')
   const [createSQLDialog, setCreateSQLDialog] = useState<CreateSQLDialogState | null>(null)
   const [exportDialog, setExportDialog] = useState<ExportDialogState | null>(null)
+  const [importDialog, setImportDialog] = useState<ImportDialogState | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [nodes, setNodes] = useState<Record<string, NodeState>>({})
   const [stickyDatabase, setStickyDatabase] = useState<StickyDatabaseContext | null>(null)
@@ -370,6 +372,15 @@ export function Sidebar() {
     })
   }
 
+  const openImportDialog = (menu: TableMenuState) => {
+    setTableMenu(null)
+    setImportDialog({
+      connection: menu.connection,
+      database: menu.database,
+      table: menu.table
+    })
+  }
+
   const dropTable = async (menu: TableMenuState) => {
     setTableMenu(null)
     if (!confirm(t('sidebar.confirm.dropTable', { table: menu.table }))) return
@@ -385,6 +396,28 @@ export function Sidebar() {
       await refreshDatabase(menu.connection, menu.database)
       closeTableTabs(menu.connection.id, menu.database, menu.table)
       showToast(t('sidebar.toast.droppedTable', { table: menu.table }), 'success')
+    } catch (err) {
+      showToast((err as Error).message, 'error')
+    } finally {
+      setActionBusy(false)
+    }
+  }
+
+  const truncateTable = async (menu: TableMenuState) => {
+    setTableMenu(null)
+    if (!confirm(t('sidebar.confirm.truncateTable', { table: menu.table }))) return
+    setActionBusy(true)
+    try {
+      await unwrap(
+        api.db.truncateTable({
+          connectionId: menu.connection.id,
+          database: menu.database,
+          table: menu.table
+        })
+      )
+      await refreshDatabase(menu.connection, menu.database)
+      refreshTableData(menu.connection.id, menu.database, menu.table)
+      showToast(t('sidebar.toast.truncatedTable', { table: menu.table }), 'success')
     } catch (err) {
       showToast((err as Error).message, 'error')
     } finally {
@@ -490,6 +523,8 @@ export function Sidebar() {
         onCopyTable={copyTable}
         onShowCreateSQL={showCreateSQL}
         onExportTable={openExportDialog}
+        onImportTable={openImportDialog}
+        onTruncateTable={truncateTable}
         onDropTable={dropTable}
         renameDialog={renameDialog}
         renameDraft={renameDraft}
@@ -510,6 +545,13 @@ export function Sidebar() {
         exportDialog={exportDialog}
         onExportDialogOpenChange={(open) => {
           if (!open) setExportDialog(null)
+        }}
+        importDialog={importDialog}
+        onImportDialogOpenChange={(open) => {
+          if (!open) setImportDialog(null)
+        }}
+        onImported={() => {
+          if (importDialog) return refreshDatabase(importDialog.connection, importDialog.database)
         }}
       />
     </>

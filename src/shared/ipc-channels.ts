@@ -17,7 +17,9 @@ export const IPC = {
   RenameTable: 'db:renameTable',
   CopyTable: 'db:copyTable',
   DropTable: 'db:dropTable',
+  TruncateTable: 'db:truncateTable',
   ExportTable: 'db:exportTable',
+  ImportTable: 'db:importTable',
 
   // 表结构
   GetTableSchema: 'schema:getTable',

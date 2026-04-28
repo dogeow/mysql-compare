@@ -141,11 +141,19 @@ export interface DropTableRequest {
   table: string
 }
 
+export interface TruncateTableRequest {
+  connectionId: string
+  database: string
+  table: string
+}
+
 export type ExportFormat = 'sql' | 'csv' | 'txt'
 
-export type ExportScope = 'all' | 'filtered' | 'page'
+export type ExportScope = 'all' | 'filtered' | 'page' | 'selected'
 
 export type ExportSqlDialect = 'source' | DbEngine
+
+export type ImportFormat = ExportFormat
 
 export interface ExportTableRequest {
   connectionId: string
@@ -158,6 +166,7 @@ export interface ExportTableRequest {
   orderBy?: { column: string; dir: 'ASC' | 'DESC' }
   page?: number
   pageSize?: number
+  selectedRows?: Record<string, unknown>[]
   includeCreateTable?: boolean
   includeData?: boolean
   includeHeaders?: boolean
@@ -167,6 +176,24 @@ export interface ExportTableResult {
   canceled: boolean
   filePath?: string
   rowsExported: number
+}
+
+export interface ImportTableRequest {
+  connectionId: string
+  database: string
+  table: string
+  format: ImportFormat
+  includeHeaders?: boolean
+  emptyAsNull?: boolean
+  fileName?: string
+  fileContent?: string
+}
+
+export interface ImportTableResult {
+  canceled: boolean
+  filePath?: string
+  rowsImported: number
+  statementsExecuted: number
 }
 
 // ---------- Diff ----------

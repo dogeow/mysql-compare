@@ -39,6 +39,7 @@ vi.mock('./schema-service', () => ({
 
 import { exportService } from './export-service'
 import { mysqlDialect } from './drivers/mysql-dialect'
+import { pgDialect } from './drivers/pg-dialect'
 
 describe('ExportService', () => {
   beforeEach(() => {
@@ -106,24 +107,57 @@ describe('ExportService', () => {
     await exportService.exportTable(createExportRequest())
 
     const output = getAppendedOutput()
-    expect(output).toContain('CREATE TABLE `users`')
+    expect(output).toContain('CREATE DATABASE IF NOT EXISTS `shop`;')
+    expect(output).toContain('CREATE TABLE `shop`.`users`')
     expect(output).toContain('INSERT INTO `shop`.`users`')
     expect(output).toContain('`name`')
   })
 
-  it('rejects unsupported target SQL dialects before opening the save dialog', async () => {
-    const { driver } = createPostgresDriver()
+  it('exports PostgreSQL table data as MySQL-compatible SQL', async () => {
+    const { driver } = createPostgresDriver({
+      streamBatches: [[{ id: 1, name: 'Ada', payload: { ok: true }, created_at: '2026-04-24T17:56:07.000Z' }]]
+    })
+
+    getDriver.mockResolvedValue(driver)
+    getTableSchema.mockResolvedValue(buildPostgresSchema())
+
+    const result = await exportService.exportTable(
+      createExportRequest({ connectionId: 'pg-conn', sqlDialect: 'mysql' })
+    )
+
+    const output = getAppendedOutput()
+    expect(result).toEqual({ canceled: false, filePath: '/tmp/users.sql', rowsExported: 1 })
+    expect(output).toContain('CREATE DATABASE IF NOT EXISTS `shop`;')
+    expect(output).toContain('CREATE TABLE `shop`.`users`')
+    expect(output).toContain('`id` bigint AUTO_INCREMENT NOT NULL')
+    expect(output).toContain('`name` varchar(255) NOT NULL')
+    expect(output).toContain('`payload` json NULL')
+    expect(output).toContain('`created_at` datetime(6) NULL DEFAULT CURRENT_TIMESTAMP')
+    expect(output).toContain('INSERT INTO `shop`.`users`')
+    expect(output).not.toContain('"public"')
+  })
+
+  it('exports only selected rows when selected scope is requested', async () => {
+    const { driver, streamRows } = createMySQLDriver({ streamBatches: [[{ id: 1, name: 'Ada' }]] })
 
     getDriver.mockResolvedValue(driver)
     getTableSchema.mockResolvedValue(buildSchema())
 
-    await expect(
-      exportService.exportTable(createExportRequest({ connectionId: 'pg-conn', sqlDialect: 'mysql' }))
-    ).rejects.toThrow('Exporting postgres tables as mysql SQL is not supported')
+    const result = await exportService.exportTable(
+      createExportRequest({
+        format: 'csv',
+        scope: 'selected',
+        selectedRows: [
+          { id: 2, name: 'Bob', active: 1, payload: null, created_at: null }
+        ]
+      })
+    )
 
-    expect(showSaveDialog).not.toHaveBeenCalled()
-    expect(writeFile).not.toHaveBeenCalled()
-    expect(appendFile).not.toHaveBeenCalled()
+    const output = getAppendedOutput()
+    expect(result.rowsExported).toBe(1)
+    expect(output).toContain('id,name,active,payload,created_at')
+    expect(output).toContain('2,Bob,1,,')
+    expect(streamRows).not.toHaveBeenCalled()
   })
 })
 
@@ -160,15 +194,18 @@ function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]
   return { driver, streamRows }
 }
 
-function createPostgresDriver(): { driver: DbDriver } {
+function createPostgresDriver(options: { streamBatches: Record<string, unknown>[][] }): { driver: DbDriver } {
   const streamRows = vi.fn(async function* () {
-    yield []
+    for (const batch of options.streamBatches) {
+      yield batch
+    }
   })
 
   const driver = {
     ...createMySQLDriver({ streamBatches: [] }).driver,
     engine: 'postgres',
     connectionId: 'pg-conn',
+    dialect: pgDialect,
     streamRows
   } satisfies DbDriver
 
@@ -237,7 +274,58 @@ function buildSchema(): TableSchema {
     indexes: [{ name: 'PRIMARY', columns: ['id'], unique: true, type: 'BTREE' }],
     primaryKey: ['id'],
     createSQL:
-      'CREATE TABLE `users` (`id` int NOT NULL AUTO_INCREMENT, `name` varchar(255) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB'
+      'CREATE TABLE `legacy`.`users` (`id` int NOT NULL AUTO_INCREMENT, `name` varchar(255) NOT NULL, PRIMARY KEY (`id`)) ENGINE=InnoDB'
+  }
+}
+
+function buildPostgresSchema(): TableSchema {
+  return {
+    name: 'users',
+    columns: [
+      {
+        name: 'id',
+        type: 'bigint',
+        nullable: false,
+        defaultValue: "nextval('users_id_seq'::regclass)",
+        isPrimaryKey: true,
+        isAutoIncrement: true,
+        comment: '',
+        columnKey: 'PRI'
+      },
+      {
+        name: 'name',
+        type: 'character varying(255)',
+        nullable: false,
+        defaultValue: null,
+        isPrimaryKey: false,
+        isAutoIncrement: false,
+        comment: '',
+        columnKey: ''
+      },
+      {
+        name: 'payload',
+        type: 'json',
+        nullable: true,
+        defaultValue: null,
+        isPrimaryKey: false,
+        isAutoIncrement: false,
+        comment: '',
+        columnKey: ''
+      },
+      {
+        name: 'created_at',
+        type: 'timestamp without time zone',
+        nullable: true,
+        defaultValue: 'CURRENT_TIMESTAMP',
+        isPrimaryKey: false,
+        isAutoIncrement: false,
+        comment: '',
+        columnKey: ''
+      }
+    ],
+    indexes: [{ name: 'users_pkey', columns: ['id'], unique: true, type: 'BTREE' }],
+    primaryKey: ['id'],
+    createSQL: 'CREATE TABLE "public"."users" ("id" bigint, "name" character varying(255))'
   }
 }
 

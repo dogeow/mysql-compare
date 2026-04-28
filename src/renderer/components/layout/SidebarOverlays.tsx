@@ -1,6 +1,7 @@
-import { Copy, Download, FileCode2, Pencil, Trash2 } from 'lucide-react'
+import { Copy, Download, Eraser, FileCode2, Pencil, Trash2, Upload } from 'lucide-react'
 import { ConnectionDialog } from '@renderer/components/connection/ConnectionDialog'
 import { ExportTableDialog } from '@renderer/components/table-view/ExportTableDialog'
+import { ImportTableDialog } from '@renderer/components/table-view/ImportTableDialog'
 import { Button } from '@renderer/components/ui/button'
 import { Dialog } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
@@ -11,6 +12,7 @@ import type { SafeConnection } from '../../../shared/types'
 import type {
   CreateSQLDialogState,
   ExportDialogState,
+  ImportDialogState,
   RenameDialogState,
   TableMenuState
 } from './sidebar-types'
@@ -26,6 +28,8 @@ interface SidebarOverlaysProps {
   onCopyTable: (menu: TableMenuState) => void | Promise<void>
   onShowCreateSQL: (menu: TableMenuState) => void | Promise<void>
   onExportTable: (menu: TableMenuState) => void
+  onImportTable: (menu: TableMenuState) => void
+  onTruncateTable: (menu: TableMenuState) => void | Promise<void>
   onDropTable: (menu: TableMenuState) => void | Promise<void>
   renameDialog: RenameDialogState | null
   renameDraft: string
@@ -38,6 +42,9 @@ interface SidebarOverlaysProps {
   onCopyCreateSQL: () => void
   exportDialog: ExportDialogState | null
   onExportDialogOpenChange: (open: boolean) => void
+  importDialog: ImportDialogState | null
+  onImportDialogOpenChange: (open: boolean) => void
+  onImported: () => void | Promise<void>
 }
 
 export function SidebarOverlays({
@@ -51,6 +58,8 @@ export function SidebarOverlays({
   onCopyTable,
   onShowCreateSQL,
   onExportTable,
+  onImportTable,
+  onTruncateTable,
   onDropTable,
   renameDialog,
   renameDraft,
@@ -62,7 +71,10 @@ export function SidebarOverlays({
   onCreateSQLDialogOpenChange,
   onCopyCreateSQL,
   exportDialog,
-  onExportDialogOpenChange
+  onExportDialogOpenChange,
+  importDialog,
+  onImportDialogOpenChange,
+  onImported
 }: SidebarOverlaysProps) {
   const { t } = useI18n()
   return (
@@ -103,7 +115,18 @@ export function SidebarOverlays({
               label={t('sidebar.overlays.exportEllipsis')}
               onClick={() => onExportTable(tableMenu)}
             />
+            <TableMenuItem
+              icon={<Upload className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.importEllipsis')}
+              onClick={() => onImportTable(tableMenu)}
+            />
             <div className="my-1 h-px bg-border" />
+            <TableMenuItem
+              icon={<Eraser className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.truncateTable')}
+              onClick={() => onTruncateTable(tableMenu)}
+              danger
+            />
             <TableMenuItem
               icon={<Trash2 className="h-3.5 w-3.5" />}
               label={t('sidebar.overlays.dropTable')}
@@ -181,6 +204,17 @@ export function SidebarOverlays({
           database={exportDialog.database}
           table={exportDialog.table}
           availableScopes={['all']}
+        />
+      )}
+
+      {importDialog && (
+        <ImportTableDialog
+          open
+          onOpenChange={onImportDialogOpenChange}
+          connectionId={importDialog.connection.id}
+          database={importDialog.database}
+          table={importDialog.table}
+          onImported={onImported}
         />
       )}
     </>

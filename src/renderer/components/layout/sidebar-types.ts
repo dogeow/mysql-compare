@@ -34,6 +34,12 @@ export interface ExportDialogState {
   table: string
 }
 
+export interface ImportDialogState {
+  connection: SafeConnection
+  database: string
+  table: string
+}
+
 export interface StickyDatabaseContext {
   connectionName: string
   database: string

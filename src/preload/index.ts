@@ -10,6 +10,8 @@ import type {
   DropTableRequest,
   ExportTableRequest,
   ExportTableResult,
+  ImportTableRequest,
+  ImportTableResult,
   InsertRowRequest,
   IPCResult,
   QueryRowsRequest,
@@ -22,6 +24,7 @@ import type {
   TableComparisonResult,
   TableDiffRequest,
   TableSchema,
+  TruncateTableRequest,
   UpdateRowRequest
 } from '../shared/types'
 
@@ -49,7 +52,9 @@ const api = {
     renameTable: (req: RenameTableRequest) => invoke<{ table: string }>(IPC.RenameTable, req),
     copyTable: (req: CopyTableRequest) => invoke<{ table: string }>(IPC.CopyTable, req),
     dropTable: (req: DropTableRequest) => invoke<void>(IPC.DropTable, req),
-    exportTable: (req: ExportTableRequest) => invoke<ExportTableResult>(IPC.ExportTable, req)
+    truncateTable: (req: TruncateTableRequest) => invoke<void>(IPC.TruncateTable, req),
+    exportTable: (req: ExportTableRequest) => invoke<ExportTableResult>(IPC.ExportTable, req),
+    importTable: (req: ImportTableRequest) => invoke<ImportTableResult>(IPC.ImportTable, req)
   },
   schema: {
     getTable: (connectionId: string, database: string, table: string) =>
