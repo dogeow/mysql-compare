@@ -8,6 +8,8 @@ import type {
   DiffRequest,
   DeleteRowsRequest,
   DropTableRequest,
+  ExportDatabaseRequest,
+  ExportDatabaseResult,
   ExportTableRequest,
   ExportTableResult,
   ImportTableRequest,
@@ -54,6 +56,7 @@ const api = {
     dropTable: (req: DropTableRequest) => invoke<void>(IPC.DropTable, req),
     truncateTable: (req: TruncateTableRequest) => invoke<void>(IPC.TruncateTable, req),
     exportTable: (req: ExportTableRequest) => invoke<ExportTableResult>(IPC.ExportTable, req),
+    exportDatabase: (req: ExportDatabaseRequest) => invoke<ExportDatabaseResult>(IPC.ExportDatabase, req),
     importTable: (req: ImportTableRequest) => invoke<ImportTableResult>(IPC.ImportTable, req)
   },
   schema: {

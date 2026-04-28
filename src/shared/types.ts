@@ -178,6 +178,22 @@ export interface ExportTableResult {
   rowsExported: number
 }
 
+export interface ExportDatabaseRequest {
+  connectionId: string
+  database: string
+  format: 'sql'
+  sqlDialect?: ExportSqlDialect
+  includeCreateTable?: boolean
+  includeData?: boolean
+}
+
+export interface ExportDatabaseResult {
+  canceled: boolean
+  filePath?: string
+  tablesExported: number
+  rowsExported: number
+}
+
 export interface ImportTableRequest {
   connectionId: string
   database: string

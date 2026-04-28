@@ -1,7 +1,17 @@
-import { BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, shell } from 'electron'
+import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 
+export function resolveAppIconPath(): string | undefined {
+  const candidates = app.isPackaged
+    ? [join(process.resourcesPath, 'icon.png')]
+    : [join(app.getAppPath(), 'build', 'icon.png'), join(__dirname, '../../build/icon.png')]
+
+  return candidates.find((candidate) => existsSync(candidate))
+}
+
 export function createMainWindow(): BrowserWindow {
+  const icon = resolveAppIconPath()
   const win = new BrowserWindow({
     width: 1280,
     height: 820,
@@ -9,6 +19,7 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 640,
     title: 'MySQL Compare',
     backgroundColor: '#0a0a0a',
+    icon,
     autoHideMenuBar: true,
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),

@@ -6,11 +6,69 @@ import { dbService } from './db-service'
 import type { DbDriver } from './drivers/types'
 import { mysqlDialect } from './drivers/mysql-dialect'
 import { pgDialect, renderPgCreateTable } from './drivers/pg-dialect'
-import type { ColumnInfo, DbEngine, ExportSqlDialect, ExportTableRequest, ExportTableResult, TableSchema } from '../../shared/types'
+import type {
+  ColumnInfo,
+  DbEngine,
+  ExportDatabaseRequest,
+  ExportDatabaseResult,
+  ExportSqlDialect,
+  ExportTableRequest,
+  ExportTableResult,
+  TableSchema
+} from '../../shared/types'
 
 const EXPORT_BATCH_SIZE = 1000
 
 export class ExportService {
+  async exportDatabase(req: ExportDatabaseRequest): Promise<ExportDatabaseResult> {
+    this.validateDatabase(req)
+
+    const driver = await dbService.getDriver(req.connectionId)
+    const sqlDialect = resolveSqlDialect(req.sqlDialect, driver.engine)
+    assertSqlDialectSupported(driver.engine, sqlDialect)
+    const tables = await driver.listTables(req.database)
+    const filePath = await this.pickDatabaseFilePath(req, sqlDialect)
+    if (!filePath) {
+      return { canceled: true, tablesExported: 0, rowsExported: 0 }
+    }
+
+    await writeFile(filePath, '', 'utf8')
+
+    const includeCreateTable = req.includeCreateTable !== false
+    const includeData = req.includeData !== false
+    const targetDialect = getTargetDialect(driver, sqlDialect)
+    let rowsExported = 0
+
+    if (includeCreateTable) {
+      const prelude = buildDatabasePrelude(req.database, sqlDialect)
+      if (prelude) await appendFile(filePath, `${prelude}\n\n`, 'utf8')
+    }
+
+    for (const table of tables) {
+      const schema = await schemaService.getTableSchema(req.connectionId, req.database, table)
+      if (includeCreateTable) {
+        await appendFile(
+          filePath,
+          `${buildCreateTableSQL(schema, req.database, driver, sqlDialect, { includeDatabasePrelude: false })}\n\n`,
+          'utf8'
+        )
+      }
+      if (includeData) {
+        for await (const rows of this.iterateAllRows(driver, req.database, table, schema.columns, schema.primaryKey)) {
+          if (rows.length === 0) continue
+          rowsExported += rows.length
+          await appendFile(
+            filePath,
+            `${targetDialect.renderInsert(req.database, table, schema.columns, rows)}\n`,
+            'utf8'
+          )
+        }
+      }
+    }
+
+    return { canceled: false, filePath, tablesExported: tables.length, rowsExported }
+  }
+
   async exportTable(req: ExportTableRequest): Promise<ExportTableResult> {
     this.validate(req)
 
@@ -66,6 +124,23 @@ export class ExportService {
     }
 
     return { canceled: false, filePath, rowsExported }
+  }
+
+  private validateDatabase(req: ExportDatabaseRequest): void {
+    if (!req.connectionId) throw new Error('Connection is required')
+    if (!req.database) throw new Error('Database is required')
+    if (req.format !== 'sql') throw new Error('Database export only supports SQL')
+    if (req.includeCreateTable === false && req.includeData === false) {
+      throw new Error('Select structure or data for SQL export')
+    }
+    if (
+      req.sqlDialect !== undefined &&
+      req.sqlDialect !== 'source' &&
+      req.sqlDialect !== 'mysql' &&
+      req.sqlDialect !== 'postgres'
+    ) {
+      throw new Error('Unsupported SQL export dialect')
+    }
   }
 
   private validate(req: ExportTableRequest): void {
@@ -127,6 +202,23 @@ export class ExportService {
     return normalizeExtension(response.filePath, extension)
   }
 
+  private async pickDatabaseFilePath(req: ExportDatabaseRequest, sqlDialect: DbEngine): Promise<string | null> {
+    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+    const options = {
+      title: `Export ${req.database}`,
+      defaultPath: sanitizeFileName(`${req.database}.${sqlDialect}.sql`),
+      filters: [
+        { name: `${sqlDialect.toUpperCase()} SQL`, extensions: ['sql'] },
+        { name: 'All Files', extensions: ['*'] }
+      ]
+    }
+    const response = win
+      ? await dialog.showSaveDialog(win, options)
+      : await dialog.showSaveDialog(options)
+    if (response.canceled || !response.filePath) return null
+    return normalizeExtension(response.filePath, 'sql')
+  }
+
   private async *iterateRows(
     driver: DbDriver,
     req: ExportTableRequest,
@@ -176,6 +268,24 @@ export class ExportService {
       yield batch
     }
   }
+
+  private async *iterateAllRows(
+    driver: DbDriver,
+    database: string,
+    table: string,
+    columns: ColumnInfo[],
+    primaryKey: string[]
+  ): AsyncGenerator<Record<string, unknown>[]> {
+    for await (const batch of driver.streamRows({
+      database,
+      table,
+      columns: columns.map((column) => column.name),
+      primaryKey,
+      batchSize: EXPORT_BATCH_SIZE
+    })) {
+      yield batch
+    }
+  }
 }
 
 function resolveSqlDialect(sqlDialect: ExportSqlDialect | undefined, sourceEngine: DbEngine): DbEngine {
@@ -194,38 +304,45 @@ function getTargetDialect(sourceDriver: DbDriver, sqlDialect: DbEngine) {
   return sourceDriver.dialect
 }
 
-function buildCreateTableSQL(
+export function buildCreateTableSQL(
   schema: TableSchema,
   database: string,
   sourceDriver: DbDriver,
-  sqlDialect: DbEngine
+  sqlDialect: DbEngine,
+  options: { includeDatabasePrelude?: boolean } = {}
 ): string {
+  const includeDatabasePrelude = options.includeDatabasePrelude !== false
   if (sqlDialect === 'postgres') {
     return ensureSemicolon(
       renderPgCreateTable(schema, database, {
-        includeSchema: true,
+        includeSchema: includeDatabasePrelude,
         sourceEngine: sourceDriver.engine
       })
     )
   }
 
   if (sqlDialect === 'mysql' && sourceDriver.engine === 'postgres') {
-    return renderMySQLCreateTable(schema, database)
+    return renderMySQLCreateTable(schema, database, { includeDatabasePrelude })
   }
 
   if (sqlDialect === 'mysql') {
     return ensureSemicolon(
       [
-        `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};`,
+        includeDatabasePrelude ? `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};` : '',
         qualifyMySQLCreateTable(sourceDriver.dialect.stripDefiner(schema.createSQL), database, schema.name)
-      ].join('\n')
+      ].filter(Boolean).join('\n')
     )
   }
 
   return ensureSemicolon(sourceDriver.dialect.stripDefiner(schema.createSQL))
 }
 
-function renderMySQLCreateTable(schema: TableSchema, database: string): string {
+function renderMySQLCreateTable(
+  schema: TableSchema,
+  database: string,
+  options: { includeDatabasePrelude?: boolean } = {}
+): string {
+  const includeDatabasePrelude = options.includeDatabasePrelude !== false
   const columnLines = schema.columns.map((column) => {
     const type = mapTypeToMySQL(column.type)
     const nullable = column.nullable ? 'NULL' : 'NOT NULL'
@@ -237,11 +354,21 @@ function renderMySQLCreateTable(schema: TableSchema, database: string): string {
     ? [`  PRIMARY KEY (${schema.primaryKey.map((name) => mysqlDialect.quoteIdent(name)).join(', ')})`]
     : []
   return ensureSemicolon([
-    `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};`,
+    includeDatabasePrelude ? `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};` : '',
     `CREATE TABLE ${mysqlDialect.quoteTable(database, schema.name)} (`,
     [...columnLines, ...primaryKey].join(',\n'),
     ') ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci'
-  ].join('\n'))
+  ].filter(Boolean).join('\n'))
+}
+
+function buildDatabasePrelude(database: string, sqlDialect: DbEngine): string {
+  if (sqlDialect === 'mysql') {
+    return `CREATE DATABASE IF NOT EXISTS ${mysqlDialect.quoteIdent(database)};`
+  }
+  if (sqlDialect === 'postgres') {
+    return `CREATE SCHEMA IF NOT EXISTS ${pgDialect.quoteIdent(database)};`
+  }
+  return ''
 }
 
 function qualifyMySQLCreateTable(createSQL: string, database: string, table: string): string {

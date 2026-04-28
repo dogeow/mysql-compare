@@ -8,7 +8,8 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "start": "electron-vite preview",
+    "start": "npm run build && electron-vite preview",
+    "preview": "electron-vite preview",
     "test": "vitest run --environment node",
     "typecheck": "tsc --noEmit",
     "dist": "electron-vite build && electron-builder",

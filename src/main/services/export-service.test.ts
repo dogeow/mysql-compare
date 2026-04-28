@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ExportTableRequest, TableSchema } from '../../shared/types'
+import type { ExportDatabaseRequest, ExportTableRequest, TableSchema } from '../../shared/types'
 import type { DbDriver } from './drivers/types'
 
 const { appendFile, writeFile, showSaveDialog, getDriver, getTableSchema } = vi.hoisted(() => ({
@@ -159,12 +159,40 @@ describe('ExportService', () => {
     expect(output).toContain('2,Bob,1,,')
     expect(streamRows).not.toHaveBeenCalled()
   })
+
+  it('exports an entire database as target-dialect SQL', async () => {
+    const { driver, streamRows } = createMySQLDriver({
+      tables: ['users'],
+      streamBatches: [[{ id: 1, name: 'Ada', active: 1, payload: null, created_at: null }]]
+    })
+
+    getDriver.mockResolvedValue(driver)
+    getTableSchema.mockResolvedValue(buildSchema())
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/shop.sql' })
+
+    const result = await exportService.exportDatabase(createDatabaseExportRequest({ sqlDialect: 'postgres' }))
+
+    const output = getAppendedOutput()
+    expect(result).toEqual({ canceled: false, filePath: '/tmp/shop.sql', tablesExported: 1, rowsExported: 1 })
+    expect(output.match(/CREATE SCHEMA IF NOT EXISTS "shop";/g)?.length).toBe(1)
+    expect(output).toContain('CREATE TABLE "shop"."users"')
+    expect(output).toContain('INSERT INTO "shop"."users"')
+    expect(streamRows).toHaveBeenCalledWith({
+      database: 'shop',
+      table: 'users',
+      columns: ['id', 'name', 'active', 'payload', 'created_at'],
+      primaryKey: ['id'],
+      batchSize: 1000
+    })
+  })
 })
 
-function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][] }): {
+function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]; tables?: string[] }): {
   driver: DbDriver
+  listTables: ReturnType<typeof vi.fn>
   streamRows: ReturnType<typeof vi.fn>
 } {
+  const listTables = vi.fn(async () => options.tables ?? [])
   const streamRows = vi.fn(async function* () {
     for (const batch of options.streamBatches) {
       yield batch
@@ -176,7 +204,7 @@ function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]
     connectionId: 'mysql-conn',
     dialect: mysqlDialect,
     listDatabases: async () => [],
-    listTables: async () => [],
+    listTables,
     getTableSchema: async () => buildSchema(),
     queryRows: async () => ({ rows: [], total: 0 }),
     insertRow: async () => ({ insertId: 0, affectedRows: 0 }),
@@ -191,7 +219,7 @@ function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]
     close: async () => undefined
   } satisfies DbDriver
 
-  return { driver, streamRows }
+  return { driver, listTables, streamRows }
 }
 
 function createPostgresDriver(options: { streamBatches: Record<string, unknown>[][] }): { driver: DbDriver } {
@@ -336,6 +364,18 @@ function createExportRequest(overrides?: Partial<ExportTableRequest>): ExportTab
     table: 'users',
     format: 'sql',
     scope: 'all',
+    includeCreateTable: true,
+    includeData: true,
+    ...overrides
+  }
+}
+
+function createDatabaseExportRequest(overrides?: Partial<ExportDatabaseRequest>): ExportDatabaseRequest {
+  return {
+    connectionId: 'mysql-conn',
+    database: 'shop',
+    format: 'sql',
+    sqlDialect: 'mysql',
     includeCreateTable: true,
     includeData: true,
     ...overrides

@@ -19,6 +19,7 @@ export const IPC = {
   DropTable: 'db:dropTable',
   TruncateTable: 'db:truncateTable',
   ExportTable: 'db:exportTable',
+  ExportDatabase: 'db:exportDatabase',
   ImportTable: 'db:importTable',
 
   // 表结构

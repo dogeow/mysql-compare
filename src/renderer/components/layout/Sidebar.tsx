@@ -9,7 +9,9 @@ import { SidebarOverlays } from './SidebarOverlays'
 import { SidebarTree } from './SidebarTree'
 import type {
   CreateSQLDialogState,
+  DatabaseMenuState,
   DatabaseRowRefEntry,
+  ExportDatabaseDialogState,
   ExportDialogState,
   ImportDialogState,
   NodeState,
@@ -54,10 +56,12 @@ export function Sidebar() {
   const [creating, setCreating] = useState(false)
   const [tableFilters, setTableFilters] = useState<Record<string, string>>({})
   const [tableMenu, setTableMenu] = useState<TableMenuState | null>(null)
+  const [databaseMenu, setDatabaseMenu] = useState<DatabaseMenuState | null>(null)
   const [renameDialog, setRenameDialog] = useState<RenameDialogState | null>(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [createSQLDialog, setCreateSQLDialog] = useState<CreateSQLDialogState | null>(null)
   const [exportDialog, setExportDialog] = useState<ExportDialogState | null>(null)
+  const [exportDatabaseDialog, setExportDatabaseDialog] = useState<ExportDatabaseDialogState | null>(null)
   const [importDialog, setImportDialog] = useState<ImportDialogState | null>(null)
   const [actionBusy, setActionBusy] = useState(false)
   const [nodes, setNodes] = useState<Record<string, NodeState>>({})
@@ -87,8 +91,11 @@ export function Sidebar() {
   }, [])
 
   useEffect(() => {
-    if (!tableMenu) return
-    const closeMenu = () => setTableMenu(null)
+    if (!tableMenu && !databaseMenu) return
+    const closeMenu = () => {
+      setTableMenu(null)
+      setDatabaseMenu(null)
+    }
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') closeMenu()
     }
@@ -100,7 +107,7 @@ export function Sidebar() {
       window.removeEventListener('keydown', onKeyDown)
       window.removeEventListener('scroll', closeMenu, true)
     }
-  }, [tableMenu])
+  }, [databaseMenu, tableMenu])
 
   useEffect(() => {
     const container = treeScrollRef.current
@@ -283,6 +290,21 @@ export function Sidebar() {
     })
   }
 
+  const openDatabaseMenu = (
+    event: React.MouseEvent<HTMLDivElement>,
+    conn: SafeConnection,
+    database: string
+  ) => {
+    event.preventDefault()
+    event.stopPropagation()
+    setDatabaseMenu({
+      x: Math.min(event.clientX, window.innerWidth - 232),
+      y: Math.min(event.clientY, window.innerHeight - 160),
+      connection: conn,
+      database
+    })
+  }
+
   const openRenameDialog = (menu: TableMenuState) => {
     setTableMenu(null)
     setRenameDialog({ connection: menu.connection, database: menu.database, table: menu.table })
@@ -369,6 +391,14 @@ export function Sidebar() {
       connectionId: menu.connection.id,
       database: menu.database,
       table: menu.table
+    })
+  }
+
+  const openExportDatabaseDialog = (connection: SafeConnection, database: string) => {
+    setDatabaseMenu(null)
+    setExportDatabaseDialog({
+      connectionId: connection.id,
+      database
     })
   }
 
@@ -487,9 +517,11 @@ export function Sidebar() {
           onDeleteConnection={onDelete}
           onToggleDatabase={toggleDatabase}
           onOpenSQLConsole={openSQLConsole}
+          onExportDatabase={openExportDatabaseDialog}
           onRefreshDatabase={refreshDatabase}
           onTableFilterChange={setTableFilter}
           onSelectTable={onSelectTable}
+          onOpenDatabaseMenu={openDatabaseMenu}
           onOpenTableMenu={openTableMenu}
         />
 
@@ -519,6 +551,17 @@ export function Sidebar() {
         onConnectionSaved={refresh}
         tableMenu={tableMenu}
         onCloseTableMenu={() => setTableMenu(null)}
+        databaseMenu={databaseMenu}
+        onCloseDatabaseMenu={() => setDatabaseMenu(null)}
+        onOpenDatabaseSQLConsole={(menu) => {
+          setDatabaseMenu(null)
+          openSQLConsole(menu.connection, menu.database)
+        }}
+        onExportDatabase={(menu) => openExportDatabaseDialog(menu.connection, menu.database)}
+        onRefreshDatabase={(menu) => {
+          setDatabaseMenu(null)
+          return refreshDatabase(menu.connection, menu.database)
+        }}
         onRenameTable={openRenameDialog}
         onCopyTable={copyTable}
         onShowCreateSQL={showCreateSQL}
@@ -545,6 +588,10 @@ export function Sidebar() {
         exportDialog={exportDialog}
         onExportDialogOpenChange={(open) => {
           if (!open) setExportDialog(null)
+        }}
+        exportDatabaseDialog={exportDatabaseDialog}
+        onExportDatabaseDialogOpenChange={(open) => {
+          if (!open) setExportDatabaseDialog(null)
         }}
         importDialog={importDialog}
         onImportDialogOpenChange={(open) => {

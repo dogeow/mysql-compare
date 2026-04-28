@@ -44,7 +44,7 @@ export function SyncPanel({
   const crossEngine = sourceEngine !== targetEngine
 
   const [selected, setSelected] = useState<Set<string>>(new Set(candidateTables))
-  const [syncStructure, setSyncStructure] = useState(!crossEngine)
+  const [syncStructure, setSyncStructure] = useState(true)
   const [syncData, setSyncData] = useState(false)
   const [strategy, setStrategy] = useState<ExistingTableStrategy>('skip')
   const [plan, setPlan] = useState<SyncPlan | null>(null)
@@ -61,13 +61,10 @@ export function SyncPanel({
   useEffect(() => {
     if (!open) return
     setSelected(new Set(candidateTables))
-    setSyncStructure(!crossEngine)
+    setSyncStructure(true)
     setSyncData(crossEngine)
     setPlan(null)
-    if (crossEngine && strategy === 'overwrite-structure') {
-      setStrategy('append-data')
-    }
-  }, [candidateTables, crossEngine, open, strategy])
+  }, [candidateTables, crossEngine, open])
 
   function buildReq(dryRun: true): SyncRequest & { dryRun: true }
   function buildReq(dryRun: false): SyncRequest & { dryRun: false }
@@ -143,7 +140,6 @@ export function SyncPanel({
             <label className="flex items-center gap-2 text-sm">
               <Checkbox
                 checked={syncStructure}
-                disabled={crossEngine}
                 onChange={(e) => setSyncStructure(e.target.checked)}
               />
               {t('common.structure')}
@@ -163,20 +159,12 @@ export function SyncPanel({
             <Select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as ExistingTableStrategy)}
-              options={
-                crossEngine
-                  ? [
-                      { value: 'skip', label: t('diff.sync.strategy.skip') },
-                      { value: 'append-data', label: t('diff.sync.strategy.keep') },
-                      { value: 'truncate-and-import', label: t('diff.sync.strategy.truncate') }
-                    ]
-                  : [
-                      { value: 'skip', label: t('diff.sync.strategy.skip') },
-                      { value: 'overwrite-structure', label: t('diff.sync.strategy.drop') },
-                      { value: 'append-data', label: t('diff.sync.strategy.keep') },
-                      { value: 'truncate-and-import', label: t('diff.sync.strategy.truncate') }
-                    ]
-              }
+              options={[
+                { value: 'skip', label: t('diff.sync.strategy.skip') },
+                { value: 'overwrite-structure', label: t('diff.sync.strategy.drop') },
+                { value: 'append-data', label: t('diff.sync.strategy.keep') },
+                { value: 'truncate-and-import', label: t('diff.sync.strategy.truncate') }
+              ]}
             />
             {(strategy === 'overwrite-structure' || strategy === 'truncate-and-import') && (
               <div className="mt-1 text-[11px] text-amber-400">

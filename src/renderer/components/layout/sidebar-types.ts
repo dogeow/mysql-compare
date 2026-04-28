@@ -16,6 +16,13 @@ export interface TableMenuState {
   table: string
 }
 
+export interface DatabaseMenuState {
+  x: number
+  y: number
+  connection: SafeConnection
+  database: string
+}
+
 export interface RenameDialogState {
   connection: SafeConnection
   database: string
@@ -32,6 +39,11 @@ export interface ExportDialogState {
   connectionId: string
   database: string
   table: string
+}
+
+export interface ExportDatabaseDialogState {
+  connectionId: string
+  database: string
 }
 
 export interface ImportDialogState {

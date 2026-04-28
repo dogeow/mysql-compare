@@ -3,6 +3,8 @@ import type {
   CopyTableRequest,
   DeleteRowsRequest,
   DropTableRequest,
+  ExportDatabaseRequest,
+  ExportDatabaseResult,
   ExportTableRequest,
   ExportTableResult,
   ImportTableRequest,
@@ -82,6 +84,10 @@ export function registerDbIPC(): void {
   handle(
     IPC.ExportTable,
     (req: ExportTableRequest): Promise<ExportTableResult> => exportService.exportTable(req)
+  )
+  handle(
+    IPC.ExportDatabase,
+    (req: ExportDatabaseRequest): Promise<ExportDatabaseResult> => exportService.exportDatabase(req)
   )
   handle(
     IPC.ImportTable,

@@ -1,5 +1,6 @@
-import { Copy, Download, Eraser, FileCode2, Pencil, Trash2, Upload } from 'lucide-react'
+import { Copy, Download, Eraser, FileCode2, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react'
 import { ConnectionDialog } from '@renderer/components/connection/ConnectionDialog'
+import { ExportDatabaseDialog } from '@renderer/components/table-view/ExportDatabaseDialog'
 import { ExportTableDialog } from '@renderer/components/table-view/ExportTableDialog'
 import { ImportTableDialog } from '@renderer/components/table-view/ImportTableDialog'
 import { Button } from '@renderer/components/ui/button'
@@ -11,6 +12,8 @@ import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
 import type {
   CreateSQLDialogState,
+  DatabaseMenuState,
+  ExportDatabaseDialogState,
   ExportDialogState,
   ImportDialogState,
   RenameDialogState,
@@ -24,6 +27,11 @@ interface SidebarOverlaysProps {
   onConnectionSaved: () => void
   tableMenu: TableMenuState | null
   onCloseTableMenu: () => void
+  databaseMenu: DatabaseMenuState | null
+  onCloseDatabaseMenu: () => void
+  onOpenDatabaseSQLConsole: (menu: DatabaseMenuState) => void
+  onExportDatabase: (menu: DatabaseMenuState) => void
+  onRefreshDatabase: (menu: DatabaseMenuState) => void | Promise<void>
   onRenameTable: (menu: TableMenuState) => void
   onCopyTable: (menu: TableMenuState) => void | Promise<void>
   onShowCreateSQL: (menu: TableMenuState) => void | Promise<void>
@@ -42,6 +50,8 @@ interface SidebarOverlaysProps {
   onCopyCreateSQL: () => void
   exportDialog: ExportDialogState | null
   onExportDialogOpenChange: (open: boolean) => void
+  exportDatabaseDialog: ExportDatabaseDialogState | null
+  onExportDatabaseDialogOpenChange: (open: boolean) => void
   importDialog: ImportDialogState | null
   onImportDialogOpenChange: (open: boolean) => void
   onImported: () => void | Promise<void>
@@ -54,6 +64,11 @@ export function SidebarOverlays({
   onConnectionSaved,
   tableMenu,
   onCloseTableMenu,
+  databaseMenu,
+  onCloseDatabaseMenu,
+  onOpenDatabaseSQLConsole,
+  onExportDatabase,
+  onRefreshDatabase,
   onRenameTable,
   onCopyTable,
   onShowCreateSQL,
@@ -72,6 +87,8 @@ export function SidebarOverlays({
   onCopyCreateSQL,
   exportDialog,
   onExportDialogOpenChange,
+  exportDatabaseDialog,
+  onExportDatabaseDialogOpenChange,
   importDialog,
   onImportDialogOpenChange,
   onImported
@@ -132,6 +149,32 @@ export function SidebarOverlays({
               label={t('sidebar.overlays.dropTable')}
               onClick={() => onDropTable(tableMenu)}
               danger
+            />
+          </div>
+        </div>
+      )}
+
+      {databaseMenu && (
+        <div className="fixed inset-0 z-[80]" onClick={onCloseDatabaseMenu}>
+          <div
+            className="absolute w-56 rounded-md border border-border bg-card p-1 shadow-xl"
+            style={{ left: databaseMenu.x, top: databaseMenu.y }}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <TableMenuItem
+              icon={<FileCode2 className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.openSqlConsole')}
+              onClick={() => onOpenDatabaseSQLConsole(databaseMenu)}
+            />
+            <TableMenuItem
+              icon={<Download className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.exportDatabase')}
+              onClick={() => onExportDatabase(databaseMenu)}
+            />
+            <TableMenuItem
+              icon={<RefreshCw className="h-3.5 w-3.5" />}
+              label={t('common.refresh')}
+              onClick={() => onRefreshDatabase(databaseMenu)}
             />
           </div>
         </div>
@@ -204,6 +247,15 @@ export function SidebarOverlays({
           database={exportDialog.database}
           table={exportDialog.table}
           availableScopes={['all']}
+        />
+      )}
+
+      {exportDatabaseDialog && (
+        <ExportDatabaseDialog
+          open
+          onOpenChange={onExportDatabaseDialogOpenChange}
+          connectionId={exportDatabaseDialog.connectionId}
+          database={exportDatabaseDialog.database}
         />
       )}
 

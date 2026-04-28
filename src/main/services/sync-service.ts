@@ -11,6 +11,7 @@ import type {
 } from '../../shared/types'
 import { dbService } from './db-service'
 import type { DbDriver } from './drivers/types'
+import { buildCreateTableSQL } from './export-service'
 import { schemaService } from './schema-service'
 
 const PREVIEW_ROW_LIMIT = 50
@@ -145,19 +146,6 @@ export class SyncService {
       }
     }
 
-    if (context.crossEngine && req.syncStructure) {
-      if (!existsInTarget) {
-        throw new Error(
-          `Cross-engine structure sync is not supported for "${table}". Create target tables first (for example with Laravel migrate), then rerun with Structure unchecked and Data checked.`
-        )
-      }
-      if (req.existingTableStrategy === 'overwrite-structure') {
-        throw new Error(
-          'Cross-engine structure overwrite is not supported. Recreate the target schema outside the tool, then rerun a data-only sync.'
-        )
-      }
-    }
-
     const schema = await schemaService.getTableSchema(
       req.sourceConnectionId,
       req.sourceDatabase,
@@ -165,6 +153,7 @@ export class SyncService {
     )
     const setupSQLs: string[] = []
     const description: string[] = []
+    const targetScope = getTargetTableScope(context.targetDriver, req.targetDatabase)
 
     if (existsInTarget && req.existingTableStrategy === 'skip') {
       return {
@@ -180,8 +169,8 @@ export class SyncService {
       if (existsInTarget) {
         switch (req.existingTableStrategy) {
           case 'overwrite-structure':
-            setupSQLs.push(targetDialect.renderDropIfExists(req.targetDatabase, table))
-            setupSQLs.push(ensureSemicolon(targetDialect.stripDefiner(schema.createSQL)))
+            setupSQLs.push(targetDialect.renderDropIfExists(targetScope, table))
+            setupSQLs.push(buildTargetCreateTableSQL(schema, req, context, targetScope))
             description.push('drop & recreate target table')
             break
           case 'append-data':
@@ -192,14 +181,14 @@ export class SyncService {
             break
         }
       } else {
-        setupSQLs.push(ensureSemicolon(targetDialect.stripDefiner(schema.createSQL)))
+        setupSQLs.push(buildTargetCreateTableSQL(schema, req, context, targetScope))
         description.push('create table')
       }
     }
 
     if (req.syncData) {
       if (existsInTarget && req.existingTableStrategy === 'truncate-and-import') {
-        setupSQLs.push(targetDialect.renderTruncate(req.targetDatabase, table))
+        setupSQLs.push(targetDialect.renderTruncate(targetScope, table))
       }
       description.push(preview ? `data preview (${PREVIEW_ROW_LIMIT} rows)` : 'data sync')
     }
@@ -237,6 +226,7 @@ export class SyncService {
     if (schema.columns.length === 0) return
 
     const targetDialect = context.targetDriver.dialect
+    const targetScope = getTargetTableScope(context.targetDriver, req.targetDatabase)
     const columnNames = schema.columns.map((c) => c.name)
 
     for await (const batch of context.sourceDriver.streamRows({
@@ -247,9 +237,41 @@ export class SyncService {
       batchSize: INSERT_BATCH_SIZE,
       limit: prepared.dataRowLimit
     })) {
-      yield targetDialect.renderInsert(req.targetDatabase, prepared.table, schema.columns, batch)
+      yield targetDialect.renderInsert(targetScope, prepared.table, schema.columns, batch)
     }
   }
+}
+
+function buildTargetCreateTableSQL(
+  schema: TableSchema,
+  req: SyncRequest,
+  context: SyncContext,
+  targetScope: string
+): string {
+  if (context.sourceDriver.engine !== context.targetDriver.engine) {
+    return buildCreateTableSQL(schema, targetScope, context.sourceDriver, context.targetDriver.engine, {
+      includeDatabasePrelude: false
+    })
+  }
+
+  if (context.targetDriver.engine === 'postgres') {
+    return buildCreateTableSQL(schema, targetScope, context.sourceDriver, 'postgres', {
+      includeDatabasePrelude: false
+    })
+  }
+
+  if (context.targetDriver.engine === 'mysql') {
+    return buildCreateTableSQL(schema, req.targetDatabase, context.sourceDriver, 'mysql', {
+      includeDatabasePrelude: false
+    })
+  }
+
+  return ensureSemicolon(context.targetDriver.dialect.stripDefiner(schema.createSQL))
+}
+
+function getTargetTableScope(targetDriver: DbDriver, targetDatabase: string): string {
+  // PostgresDriver connects to the selected database and uses the public schema for table ops.
+  return targetDriver.engine === 'postgres' ? 'public' : targetDatabase
 }
 
 function emptySchema(table: string): TableSchema {

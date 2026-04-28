@@ -3,11 +3,13 @@ import {
   ChevronDown,
   ChevronRight,
   Database,
+  Download,
   FileCode2,
   Pencil,
   Plus,
   RefreshCw,
   Search,
+  Server,
   Table as TableIcon,
   Trash2
 } from 'lucide-react'
@@ -38,9 +40,15 @@ interface SidebarTreeProps {
   onDeleteConnection: (connection: SafeConnection) => void | Promise<void>
   onToggleDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
   onOpenSQLConsole: (connection: SafeConnection, database: string) => void
+  onExportDatabase: (connection: SafeConnection, database: string) => void
   onRefreshDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
   onTableFilterChange: (connectionId: string, database: string, value: string) => void
   onSelectTable: (connection: SafeConnection, database: string, table: string) => void
+  onOpenDatabaseMenu: (
+    event: MouseEvent<HTMLDivElement>,
+    connection: SafeConnection,
+    database: string
+  ) => void
   onOpenTableMenu: (
     event: MouseEvent<HTMLDivElement>,
     connection: SafeConnection,
@@ -65,9 +73,11 @@ export function SidebarTree({
   onDeleteConnection,
   onToggleDatabase,
   onOpenSQLConsole,
+  onExportDatabase,
   onRefreshDatabase,
   onTableFilterChange,
   onSelectTable,
+  onOpenDatabaseMenu,
   onOpenTableMenu
 }: SidebarTreeProps) {
   const { t } = useI18n()
@@ -117,7 +127,7 @@ export function SidebarTree({
                   ) : (
                     <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
-                  <Database className="h-3.5 w-3.5 text-sky-400" />
+                  <Server className="h-3.5 w-3.5 text-sky-400" />
                   <span className="truncate">{connection.name}</span>
                   {connection.useSSH && <span className="ml-1 text-[9px] text-amber-400">SSH</span>}
                 </button>
@@ -164,6 +174,8 @@ export function SidebarTree({
                           }}
                           className="flex cursor-pointer items-center px-2 py-1 hover:bg-accent"
                           onClick={() => onToggleDatabase(connection, database)}
+                          onContextMenu={(event) => onOpenDatabaseMenu(event, connection, database)}
+                          title={t('sidebar.databaseRightClickHint')}
                         >
                           {dbExpanded ? (
                             <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
@@ -183,6 +195,16 @@ export function SidebarTree({
                                 title={t('sidebar.openSqlConsole', { database })}
                               >
                                 <FileCode2 className="h-3 w-3" />
+                              </button>
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  onExportDatabase(connection, database)
+                                }}
+                                className="p-1 text-muted-foreground hover:text-foreground"
+                                title={t('sidebar.exportDatabase', { database })}
+                              >
+                                <Download className="h-3 w-3" />
                               </button>
                               <button
                                 onClick={(event) => {

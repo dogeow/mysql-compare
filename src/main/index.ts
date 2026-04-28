@@ -1,5 +1,5 @@
 import { app, BrowserWindow } from 'electron'
-import { createMainWindow } from './window'
+import { createMainWindow, resolveAppIconPath } from './window'
 import { registerIPC } from './ipc'
 import { dbService } from './services/db-service'
 import { sshService } from './services/ssh-service'
@@ -23,6 +23,9 @@ if (!gotLock) {
 }
 
 app.whenReady().then(async () => {
+  const icon = resolveAppIconPath()
+  if (process.platform === 'darwin' && icon) app.dock?.setIcon(icon)
+
   registerIPC()
   createMainWindow()
 
