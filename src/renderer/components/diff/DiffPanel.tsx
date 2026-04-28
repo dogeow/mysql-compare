@@ -20,6 +20,7 @@ import {
   formatCompareButtonLabel,
   formatCompareSetupSummary
 } from './diff-panel-formatters'
+import { useI18n } from '@renderer/i18n'
 import { SyncPanel } from './SyncPanel'
 import { DiffPanelContentArea } from './DiffPanelContentArea'
 import { DiffPanelResultBody } from './DiffPanelResultBody'
@@ -28,7 +29,7 @@ import { DiffPanelToolbar } from './DiffPanelToolbar'
 import {
   buildDiffPanelTabItems,
   buildDiffPanelToolbarSummary,
-  DIFF_PANEL_SKIPPED_ROW_NOTICE,
+  getDiffPanelSkippedRowNotice,
   getFullyIdenticalNotice
 } from './diff-panel-view-state'
 import {
@@ -40,6 +41,7 @@ import {
 export function DiffPanel() {
   const { connections, refresh } = useConnectionStore()
   const { setRightView, showToast } = useUIStore()
+  const { t } = useI18n()
 
   const [srcId, setSrcId] = useState('')
   const [tgtId, setTgtId] = useState('')
@@ -74,6 +76,7 @@ export function DiffPanel() {
     compareData,
     tableCompareConcurrency,
     showToast,
+    t,
     onBeforeCompare: () => {
       setSelectedComparisonTable(null)
       setPreferences((current) => ({
@@ -165,15 +168,18 @@ export function DiffPanel() {
     : 0
   const rowComparisonTables = diff?.rowComparisons.map((rowComparison) => rowComparison.table) ?? []
   const rowDiffTables = changedRowComparisons.map((rowComparison) => rowComparison.table)
-  const compareSetupSummary = formatCompareSetupSummary({
-    sourceConnectionName: selectedSourceConnection?.name,
-    sourceDatabase: srcDb,
-    targetConnectionName: selectedTargetConnection?.name,
-    targetDatabase: tgtDb,
-    compareData
-  })
-  const sourceDatabaseOptions = buildDatabaseOptions(srcId, srcDbs, srcDbsLoading)
-  const targetDatabaseOptions = buildDatabaseOptions(tgtId, tgtDbs, tgtDbsLoading)
+  const compareSetupSummary = formatCompareSetupSummary(
+    {
+      sourceConnectionName: selectedSourceConnection?.name,
+      sourceDatabase: srcDb,
+      targetConnectionName: selectedTargetConnection?.name,
+      targetDatabase: tgtDb,
+      compareData
+    },
+    t
+  )
+  const sourceDatabaseOptions = buildDatabaseOptions(srcId, srcDbs, srcDbsLoading, t)
+  const targetDatabaseOptions = buildDatabaseOptions(tgtId, tgtDbs, tgtDbsLoading, t)
 
   useEffect(() => {
     const preferredTable = getPreferredComparisonTable(
@@ -230,30 +236,33 @@ export function DiffPanel() {
     })
   }
 
-  const tabItems = buildDiffPanelTabItems({
-    sourceTableCount: sourceTables.length,
-    targetTableCount: targetTables.length,
-    comparisonEntryCount: comparisonEntries.length,
-    compareErrorCount,
-    visibleSchemaDiffCount: visibleSchemaDiffs.length,
-    compareData,
-    rowChangedTableCount,
-    rowSkippedTableCount
-  })
+  const tabItems = buildDiffPanelTabItems(
+    {
+      sourceTableCount: sourceTables.length,
+      targetTableCount: targetTables.length,
+      comparisonEntryCount: comparisonEntries.length,
+      compareErrorCount,
+      visibleSchemaDiffCount: visibleSchemaDiffs.length,
+      compareData,
+      rowChangedTableCount,
+      rowSkippedTableCount
+    },
+    t
+  )
   const diffToolbarSummary = buildDiffPanelToolbarSummary({
     diff,
     comparePhase,
     rowChangedTableCount,
     rowSkippedTableCount
   })
-  const identicalNotice = diff && fullyIdentical ? getFullyIdenticalNotice(compareData) : null
+  const identicalNotice = diff && fullyIdentical ? getFullyIdenticalNotice(compareData, t) : null
   const skippedRowNotice =
     diff &&
     compareData &&
     diff.tableDiffs.length === 0 &&
     hasSkippedRowComparison &&
     !fullyIdentical
-      ? DIFF_PANEL_SKIPPED_ROW_NOTICE
+      ? getDiffPanelSkippedRowNotice(t)
       : null
 
   return (
@@ -294,7 +303,8 @@ export function DiffPanel() {
         compareButtonLabel={formatCompareButtonLabel(
           comparePhase,
           completedSharedTableCount,
-          sharedTableCount
+          sharedTableCount,
+          t
         )}
         compareData={compareData}
         concurrency={tableCompareConcurrency}

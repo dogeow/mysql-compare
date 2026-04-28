@@ -6,6 +6,7 @@ import { Button } from '@renderer/components/ui/button'
 import { Table, TBody, THead, Th, Tr, Td } from '@renderer/components/ui/table'
 import { Badge } from '@renderer/components/ui/badge'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n } from '@renderer/i18n'
 import type { ColumnInfo, IndexInfo, TableSchema } from '../../../shared/types'
 import { TableStructureDialogs } from './TableStructureDialogs'
 import type { ColumnDraft, IndexDraft, PendingAction } from './table-structure-types'
@@ -18,6 +19,7 @@ interface Props {
 
 export function TableStructureView({ connectionId, database, table }: Props) {
   const { showToast } = useUIStore()
+  const { t } = useI18n()
   const [schema, setSchema] = useState<TableSchema | null>(null)
   const [editingColumn, setEditingColumn] = useState<ColumnDraft | null>(null)
   const [editingIndex, setEditingIndex] = useState<IndexDraft | null>(null)
@@ -59,14 +61,18 @@ export function TableStructureView({ connectionId, database, table }: Props) {
   const reviewColumnSQL = () => {
     if (!editingColumn) return
     if (!editingColumn.name.trim() || !editingColumn.type.trim()) {
-      showToast('Column name and type are required', 'error')
+      showToast(t('tableStructure.columnRequired'), 'error')
       return
     }
     setPendingAction({
-      title: 'Confirm Column Change',
-      description: `Review SQL for ${database}.${table}.${editingColumn.originalName}`,
+      title: t('tableStructure.confirmColumnChange'),
+      description: t('tableStructure.reviewSqlForColumn', {
+        db: database,
+        table,
+        column: editingColumn.originalName
+      }),
       sql: pendingColumnSQL,
-      successMessage: 'Column structure updated'
+      successMessage: t('tableStructure.columnUpdated')
     })
   }
 
@@ -96,27 +102,31 @@ export function TableStructureView({ connectionId, database, table }: Props) {
   const reviewIndexSQL = () => {
     if (!editingIndex) return
     if (!editingIndex.primary && !editingIndex.name.trim()) {
-      showToast('Index name is required', 'error')
+      showToast(t('tableStructure.indexNameRequired'), 'error')
       return
     }
     if (editingIndex.columns.length === 0) {
-      showToast('Select at least one column', 'error')
+      showToast(t('tableStructure.selectAtLeastOneColumn'), 'error')
       return
     }
     setPendingAction({
-      title: editingIndex.mode === 'add' ? 'Confirm Add Index' : 'Confirm Index Change',
+      title: editingIndex.mode === 'add'
+        ? t('tableStructure.confirmAddIndex')
+        : t('tableStructure.confirmIndexChange'),
       description: `${database}.${table}`,
       sql: pendingIndexSQL,
-      successMessage: editingIndex.mode === 'add' ? 'Index added' : 'Index updated'
+      successMessage: editingIndex.mode === 'add'
+        ? t('tableStructure.indexAdded')
+        : t('tableStructure.indexUpdated')
     })
   }
 
   const reviewDeleteIndex = (index: IndexInfo) => {
     setPendingAction({
-      title: 'Confirm Delete Index',
+      title: t('tableStructure.confirmDeleteIndex'),
       description: `${database}.${table}.${index.name}`,
       sql: buildDropIndexSQL(database, table, index.name),
-      successMessage: `Index ${index.name} deleted`
+      successMessage: t('tableStructure.indexDeleted', { name: index.name })
     })
   }
 
@@ -137,23 +147,23 @@ export function TableStructureView({ connectionId, database, table }: Props) {
     }
   }
 
-  if (!schema) return <div className="p-3 text-xs text-muted-foreground">Loading...</div>
+  if (!schema) return <div className="p-3 text-xs text-muted-foreground">{t('common.loading')}</div>
 
   return (
     <div className="h-full min-h-0 overflow-auto p-3 pb-8 space-y-4">
       <section>
-        <h3 className="mb-2 text-sm font-medium">Columns</h3>
+        <h3 className="mb-2 text-sm font-medium">{t('common.columns')}</h3>
         <Table>
           <THead>
             <Tr>
-              <Th>Name</Th>
-              <Th>Type</Th>
-              <Th>Null</Th>
-              <Th>Default</Th>
-              <Th>Key</Th>
-              <Th>Extra</Th>
-              <Th>Comment</Th>
-              <Th className="w-20">Action</Th>
+              <Th>{t('common.name')}</Th>
+              <Th>{t('common.type')}</Th>
+              <Th>{t('tableStructure.columnHeaders.null')}</Th>
+              <Th>{t('tableStructure.columnHeaders.default')}</Th>
+              <Th>{t('tableStructure.columnHeaders.key')}</Th>
+              <Th>{t('tableStructure.columnHeaders.extra')}</Th>
+              <Th>{t('common.comment')}</Th>
+              <Th className="w-20">{t('common.action')}</Th>
             </Tr>
           </THead>
           <TBody>
@@ -161,17 +171,17 @@ export function TableStructureView({ connectionId, database, table }: Props) {
               <Tr key={column.name}>
                 <Td>{column.name}</Td>
                 <Td className="text-muted-foreground">{column.type}</Td>
-                <Td>{column.nullable ? 'YES' : 'NO'}</Td>
+                <Td>{column.nullable ? t('common.yes') : t('common.no')}</Td>
                 <Td>{column.defaultValue ?? <span className="opacity-50">NULL</span>}</Td>
                 <Td>
-                  {column.isPrimaryKey && <Badge variant="warning">PRI</Badge>}
+                  {column.isPrimaryKey && <Badge variant="warning">{t('tableStructure.pri')}</Badge>}
                   {!column.isPrimaryKey && column.columnKey && <Badge>{column.columnKey}</Badge>}
                 </Td>
-                <Td>{column.isAutoIncrement && <Badge variant="info">AUTO_INC</Badge>}</Td>
+                <Td>{column.isAutoIncrement && <Badge variant="info">{t('tableStructure.autoInc')}</Badge>}</Td>
                 <Td className="text-muted-foreground">{column.comment}</Td>
                 <Td>
                   <Button size="sm" variant="outline" onClick={() => startEditColumn(column)}>
-                    <Pencil className="h-3 w-3" /> Edit
+                    <Pencil className="h-3 w-3" /> {t('common.edit')}
                   </Button>
                 </Td>
               </Tr>
@@ -182,19 +192,19 @@ export function TableStructureView({ connectionId, database, table }: Props) {
 
       <section>
         <div className="mb-2 flex items-center justify-between gap-2">
-          <h3 className="text-sm font-medium">Indexes</h3>
+          <h3 className="text-sm font-medium">{t('tableStructure.indexes')}</h3>
           <Button size="sm" variant="outline" onClick={startAddIndex}>
-            <Plus className="h-3.5 w-3.5" /> Add Index
+            <Plus className="h-3.5 w-3.5" /> {t('tableStructure.addIndex')}
           </Button>
         </div>
         <Table>
           <THead>
             <Tr>
-              <Th>Name</Th>
-              <Th>Columns</Th>
-              <Th>Unique</Th>
-              <Th>Type</Th>
-              <Th className="w-36">Action</Th>
+              <Th>{t('common.name')}</Th>
+              <Th>{t('common.columns')}</Th>
+              <Th>{t('tableStructure.indexHeaders.unique')}</Th>
+              <Th>{t('common.type')}</Th>
+              <Th className="w-36">{t('common.action')}</Th>
             </Tr>
           </THead>
           <TBody>
@@ -202,15 +212,15 @@ export function TableStructureView({ connectionId, database, table }: Props) {
               <Tr key={index.name}>
                 <Td>{index.name}</Td>
                 <Td>{index.columns.join(', ')}</Td>
-                <Td>{index.unique ? 'YES' : 'NO'}</Td>
+                <Td>{index.unique ? t('common.yes') : t('common.no')}</Td>
                 <Td>{index.type}</Td>
                 <Td>
                   <div className="flex gap-2">
                     <Button size="sm" variant="outline" onClick={() => startEditIndex(index)}>
-                      <Pencil className="h-3 w-3" /> Edit
+                      <Pencil className="h-3 w-3" /> {t('common.edit')}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => reviewDeleteIndex(index)}>
-                      <Trash2 className="h-3 w-3" /> Delete
+                      <Trash2 className="h-3 w-3" /> {t('common.delete')}
                     </Button>
                   </div>
                 </Td>
@@ -228,10 +238,10 @@ export function TableStructureView({ connectionId, database, table }: Props) {
             variant="outline"
             onClick={() => {
               navigator.clipboard.writeText(schema.createSQL)
-              showToast('SQL copied', 'success')
+              showToast(t('common.sqlCopied'), 'success')
             }}
           >
-            <Copy className="w-3 h-3" /> Copy
+            <Copy className="w-3 h-3" /> {t('common.copy')}
           </Button>
         </div>
         <pre className="overflow-auto whitespace-pre rounded border border-border bg-card p-3 text-xs">
@@ -255,7 +265,7 @@ export function TableStructureView({ connectionId, database, table }: Props) {
         onCopyPendingSQL={() => {
           if (!pendingAction) return
           navigator.clipboard.writeText(pendingAction.sql)
-          showToast('SQL copied', 'success')
+          showToast(t('common.sqlCopied'), 'success')
         }}
         onExecutePendingAction={executePendingAction}
       />

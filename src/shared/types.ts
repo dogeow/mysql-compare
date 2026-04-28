@@ -145,11 +145,14 @@ export type ExportFormat = 'sql' | 'csv' | 'txt'
 
 export type ExportScope = 'all' | 'filtered' | 'page'
 
+export type ExportSqlDialect = 'source' | DbEngine
+
 export interface ExportTableRequest {
   connectionId: string
   database: string
   table: string
   format: ExportFormat
+  sqlDialect?: ExportSqlDialect
   scope: ExportScope
   where?: string
   orderBy?: { column: string; dir: 'ASC' | 'DESC' }

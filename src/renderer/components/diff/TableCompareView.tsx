@@ -5,6 +5,7 @@ import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n } from '@renderer/i18n'
 import type { QueryRowsResult } from '../../../shared/types'
 import { getRowDiffNavigation } from './diff-panel-utils'
 import { buildCopyValues, buildRowKey } from './table-compare-utils'
@@ -41,6 +42,7 @@ export function TableCompareView({
 }: Props) {
   const { connections } = useConnectionStore()
   const { setRightView, showToast } = useUIStore()
+  const { t } = useI18n()
   const [page, setPage] = useState(1)
   const [sourceReloadToken, setSourceReloadToken] = useState(0)
   const [targetReloadToken, setTargetReloadToken] = useState(0)
@@ -223,7 +225,7 @@ export function TableCompareView({
           failed += 1
           failedRowKeys.add(rowKey)
           if (!firstError) {
-            firstError = 'No shared target columns are available for the selected row.'
+            firstError = t('diff.compareView.noSharedTargetCols')
           }
           continue
         }
@@ -259,8 +261,8 @@ export function TableCompareView({
 
       showToast(
         failed > 0
-          ? `Copied ${inserted} row(s); ${failed} failed${firstError ? `: ${firstError}` : ''}`
-          : `Copied ${inserted} row(s) to target`,
+          ? `${t('diff.compareView.copyMixed', { copied: inserted, failed })}${firstError ? `: ${firstError}` : ''}`
+          : t('diff.compareView.copySuccess', { count: inserted }),
         failed > 0 ? 'error' : 'success'
       )
     } finally {
@@ -295,7 +297,7 @@ export function TableCompareView({
       <div className="border-b border-border bg-card px-4 py-3">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
           <div className="min-w-0 space-y-1">
-            <div className="text-xs text-muted-foreground">Side-by-side table compare</div>
+            <div className="text-xs text-muted-foreground">{t('diff.compareView.sideBySide')}</div>
             <div className="flex flex-wrap items-center gap-2 text-sm">
               <strong className="truncate">{sourceConnectionName}</strong>
               <span className="text-muted-foreground">/</span>
@@ -308,14 +310,14 @@ export function TableCompareView({
             </div>
             <p className="text-xs text-muted-foreground">
               {stableOrderColumn
-                ? `Ordered by ${stableOrderColumn}; selection tracked by primary key.`
-                : 'No shared primary key — rows may not line up across sides.'}
+                ? t('diff.compareView.orderedBy', { column: stableOrderColumn })
+                : t('diff.compareView.noSharedPk')}
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-            <Badge>{selectedCount} selected</Badge>
+            <Badge>{t('diff.compareView.selected', { count: selectedCount })}</Badge>
             <Button size="sm" variant="outline" onClick={refreshBoth}>
-              <RefreshCw className="mr-1 h-4 w-4" /> Refresh
+              <RefreshCw className="mr-1 h-4 w-4" /> {t('common.refresh')}
             </Button>
             <Button
               size="sm"
@@ -329,7 +331,7 @@ export function TableCompareView({
               }
             >
               <ArrowRight className="mr-1 h-4 w-4" />
-              {copying ? 'Copying...' : 'Copy selected to Target'}
+              {copying ? t('diff.compareView.copying') : t('diff.compareView.copySelectedToTarget')}
             </Button>
           </div>
         </div>
@@ -345,12 +347,15 @@ export function TableCompareView({
                   rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
                 }
               >
-                ← Prev diff
+                {t('diff.compareView.prevDiff')}
               </Button>
               <span className="tabular-nums">
                 {rowDiffNavigation.currentDiffPosition === null
-                  ? `${rowDiffNavigation.totalDiffTables} changed`
-                  : `Diff ${rowDiffNavigation.currentDiffPosition} / ${rowDiffNavigation.totalDiffTables}`}
+                  ? t('diff.compareView.diffsChanged', { count: rowDiffNavigation.totalDiffTables })
+                  : t('diff.compareView.diffPos', {
+                      pos: rowDiffNavigation.currentDiffPosition,
+                      total: rowDiffNavigation.totalDiffTables
+                    })}
               </span>
               <Button
                 size="sm"
@@ -359,7 +364,7 @@ export function TableCompareView({
                 disabled={!rowDiffNavigation.nextTable}
                 onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
               >
-                Next diff →
+                {t('diff.compareView.nextDiff')}
               </Button>
             </div>
           )}
@@ -371,10 +376,10 @@ export function TableCompareView({
               disabled={page <= 1}
               onClick={() => setPage(page - 1)}
             >
-              ← Prev
+              {t('diff.compareView.prev')}
             </Button>
             <span className="tabular-nums">
-              Page {page} / {totalPages}
+              {t('diff.compareView.pageOf', { page, total: totalPages })}
             </span>
             <Button
               size="sm"
@@ -383,20 +388,20 @@ export function TableCompareView({
               disabled={page >= totalPages}
               onClick={() => setPage(page + 1)}
             >
-              Next →
+              {t('diff.compareView.next')}
             </Button>
           </div>
         </div>
         {sourceState.data && !sourceState.data.hasPrimaryKey && (
           <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
-            Source table has no primary key, so copy selection is disabled to avoid unstable row targeting.
+            {t('diff.compareView.noPkCopyDisabled')}
           </div>
         )}
       </div>
 
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 p-3 xl:grid-cols-2">
         <TableComparePane
-          title="Source"
+          title={t('diff.endpoint.source')}
           connectionName={sourceConnectionName}
           database={sourceDatabase}
           table={table}
@@ -414,7 +419,7 @@ export function TableCompareView({
         />
 
         <TableComparePane
-          title="Target"
+          title={t('diff.endpoint.target')}
           connectionName={targetConnectionName}
           database={targetDatabase}
           table={table}

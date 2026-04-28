@@ -2,6 +2,7 @@ import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Select } from '@renderer/components/ui/select'
+import { useI18n } from '@renderer/i18n'
 
 export interface DiffPanelToolbarSummary {
   structureDiffCount: number
@@ -38,6 +39,7 @@ export function DiffPanelToolbar({
   onConcurrencyChange,
   onPlanSync
 }: DiffPanelToolbarProps) {
+  const { t } = useI18n()
   return (
     <div className="border-b border-border px-4 py-3">
       <div className="flex flex-wrap items-center gap-2">
@@ -51,10 +53,10 @@ export function DiffPanelToolbar({
               checked={compareData}
               onChange={(event) => onCompareDataChange(event.target.checked)}
             />
-            <span>Compare rows</span>
+            <span>{t('diff.toolbar.compareRows')}</span>
           </label>
           <div className="flex h-8 items-center gap-2 rounded-lg bg-background/35 px-2.5 text-xs text-muted-foreground">
-            <span>Parallel</span>
+            <span>{t('diff.toolbar.parallel')}</span>
             <Select
               className="h-7 w-20 border-border/50 bg-transparent px-2 text-xs"
               value={String(concurrency)}
@@ -64,30 +66,30 @@ export function DiffPanelToolbar({
             />
           </div>
           <Button size="sm" variant="outline" className="h-8 px-3" disabled={!canPlanSync} onClick={onPlanSync}>
-            Plan Sync
+            {t('diff.toolbar.planSync')}
           </Button>
         </div>
         {diffSummary && (
           <div className="ml-auto flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
             <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-              {diffSummary.structureDiffCount} structure
+              {t('diff.toolbar.structure', { count: diffSummary.structureDiffCount })}
             </Badge>
             {compareData && diffSummary.checkedRowCount > 0 && (
               <>
                 <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                  {diffSummary.checkedRowCount} checked
+                  {t('diff.toolbar.checked', { count: diffSummary.checkedRowCount })}
                 </Badge>
                 {diffSummary.rowsIdentical ? (
-                  <Badge variant="success">rows identical</Badge>
+                  <Badge variant="success">{t('diff.toolbar.rowsIdentical')}</Badge>
                 ) : (
                   <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                    {diffSummary.rowChangedTableCount} changed
+                    {t('diff.toolbar.changed', { count: diffSummary.rowChangedTableCount })}
                   </Badge>
                 )}
               </>
             )}
             {compareData && diffSummary.rowSkippedTableCount > 0 && (
-              <Badge variant="warning">{diffSummary.rowSkippedTableCount} skipped</Badge>
+              <Badge variant="warning">{t('diff.toolbar.skipped', { count: diffSummary.rowSkippedTableCount })}</Badge>
             )}
           </div>
         )}

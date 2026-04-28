@@ -1,5 +1,6 @@
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
+import { useI18n } from '@renderer/i18n'
 import { EndpointCard } from './EndpointCard'
 
 type SelectOption = { value: string; label: string }
@@ -32,6 +33,7 @@ export function DiffPanelSetupSection({
   source,
   target
 }: DiffPanelSetupSectionProps) {
+  const { t } = useI18n()
   return (
     <div className="border-b border-border">
       <div className="flex flex-wrap items-center gap-3 px-4 py-3">
@@ -41,11 +43,11 @@ export function DiffPanelSetupSection({
           ) : (
             <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
           )}
-          <span className="text-sm font-medium">Compare setup</span>
+          <span className="text-sm font-medium">{t('diff.setup.title')}</span>
         </button>
         <div className="min-w-0 flex-1 text-xs text-muted-foreground">{summary}</div>
         <Button size="sm" variant="ghost" className="h-7 px-2 text-[11px]" onClick={onToggle}>
-          {expanded ? 'Hide' : 'Show'}
+          {expanded ? t('diff.setup.hide') : t('diff.setup.show')}
         </Button>
       </div>
 
@@ -53,7 +55,7 @@ export function DiffPanelSetupSection({
         <div className="border-t border-border/40 bg-card/10 px-4 py-3">
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <EndpointCard
-              role="Source"
+              role="source"
               connectionName={source.connectionName}
               database={source.database}
               connectionOptions={source.connectionOptions}
@@ -66,7 +68,7 @@ export function DiffPanelSetupSection({
               onDatabaseChange={source.onDatabaseChange}
             />
             <EndpointCard
-              role="Target"
+              role="target"
               connectionName={target.connectionName}
               database={target.database}
               connectionOptions={target.connectionOptions}

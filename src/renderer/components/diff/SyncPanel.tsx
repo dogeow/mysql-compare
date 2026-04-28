@@ -8,6 +8,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Badge } from '@renderer/components/ui/badge'
 import { api, unwrap } from '@renderer/lib/api'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n } from '@renderer/i18n'
 import type {
   DatabaseDiff,
   DbEngine,
@@ -38,6 +39,7 @@ export function SyncPanel({
   diff
 }: Props) {
   const { showToast } = useUIStore()
+  const { t } = useI18n()
   const candidateTables = useMemo(() => diff.tableDiffs.map((t) => t.table), [diff])
   const crossEngine = sourceEngine !== targetEngine
 
@@ -94,15 +96,18 @@ export function SyncPanel({
 
   const onExecute = async () => {
     if (!plan) {
-      showToast('Build preview first', 'error')
+      showToast(t('diff.sync.buildPreviewFirst'), 'error')
       return
     }
-    if (!confirm('Execute sync to TARGET database? This may modify or destroy data.')) return
+    if (!confirm(t('diff.sync.confirmExecuteTarget'))) return
     setRunning(true)
     setLogs([])
     try {
       const r = await unwrap<{ executed: number; errors: number }>(submitSyncRequest(api.sync, buildReq(false)))
-      showToast(`Executed ${r.executed} statement(s), ${r.errors} error(s)`, r.errors === 0 ? 'success' : 'error')
+      showToast(
+        t('diff.sync.executeResult', { executed: r.executed, errors: r.errors }),
+        r.errors === 0 ? 'success' : 'error'
+      )
     } catch (err) {
       showToast((err as Error).message, 'error')
     } finally {
@@ -119,10 +124,10 @@ export function SyncPanel({
   }
 
   return (
-    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title="Sync" className="max-w-5xl">
+    <Dialog open={open} onOpenChange={(o) => !o && onClose()} title={t('diff.sync.title')} className="max-w-5xl">
       <div className="grid grid-cols-2 gap-4">
         <div>
-          <Label>Tables to sync ({selected.size}/{candidateTables.length})</Label>
+          <Label>{t('diff.sync.tablesToSync', { selected: selected.size, total: candidateTables.length })}</Label>
           <div className="border border-border rounded max-h-64 overflow-auto p-2 space-y-1 mt-1">
             {candidateTables.map((t) => (
               <label key={t} className="flex items-center gap-2 text-xs">
@@ -141,48 +146,48 @@ export function SyncPanel({
                 disabled={crossEngine}
                 onChange={(e) => setSyncStructure(e.target.checked)}
               />
-              Structure
+              {t('common.structure')}
             </label>
             <label className="flex items-center gap-2 text-sm">
               <Checkbox checked={syncData} onChange={(e) => setSyncData(e.target.checked)} />
-              Data
+              {t('common.data')}
             </label>
           </div>
           {crossEngine && (
             <div className="rounded border border-amber-500/40 bg-amber-500/10 px-3 py-2 text-[11px] text-amber-300">
-              Cross-engine sync detected: create the PostgreSQL schema first, then run data-only sync. This matches the Laravel migrate workflow.
+              {t('diff.sync.crossEngineHint')}
             </div>
           )}
           <div>
-            <Label>If table exists in target</Label>
+            <Label>{t('diff.sync.ifTableExists')}</Label>
             <Select
               value={strategy}
               onChange={(e) => setStrategy(e.target.value as ExistingTableStrategy)}
               options={
                 crossEngine
                   ? [
-                      { value: 'skip', label: 'Skip' },
-                      { value: 'append-data', label: 'Keep structure, append data' },
-                      { value: 'truncate-and-import', label: 'Truncate & Import (DESTRUCTIVE)' }
+                      { value: 'skip', label: t('diff.sync.strategy.skip') },
+                      { value: 'append-data', label: t('diff.sync.strategy.keep') },
+                      { value: 'truncate-and-import', label: t('diff.sync.strategy.truncate') }
                     ]
                   : [
-                      { value: 'skip', label: 'Skip' },
-                      { value: 'overwrite-structure', label: 'Drop & Recreate (DESTRUCTIVE)' },
-                      { value: 'append-data', label: 'Keep structure, append data' },
-                      { value: 'truncate-and-import', label: 'Truncate & Import (DESTRUCTIVE)' }
+                      { value: 'skip', label: t('diff.sync.strategy.skip') },
+                      { value: 'overwrite-structure', label: t('diff.sync.strategy.drop') },
+                      { value: 'append-data', label: t('diff.sync.strategy.keep') },
+                      { value: 'truncate-and-import', label: t('diff.sync.strategy.truncate') }
                     ]
               }
             />
             {(strategy === 'overwrite-structure' || strategy === 'truncate-and-import') && (
               <div className="mt-1 text-[11px] text-amber-400">
-                ⚠ This option will drop or truncate data on the target.
+                {t('diff.sync.destructiveWarning')}
               </div>
             )}
           </div>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={onPreview}>Preview SQL</Button>
+            <Button variant="outline" onClick={onPreview}>{t('diff.sync.previewSql')}</Button>
             <Button variant="destructive" onClick={onExecute} disabled={running || !plan}>
-              {running ? 'Running...' : 'Execute'}
+              {running ? t('diff.sync.running') : t('diff.sync.execute')}
             </Button>
           </div>
         </div>
@@ -191,7 +196,7 @@ export function SyncPanel({
       {plan && (
         <div className="mt-4">
           <div className="text-xs text-muted-foreground mb-1 flex items-center gap-2">
-            Preview <Badge>{plan.steps.reduce((s, x) => s + x.sqls.length, 0)} statements</Badge>
+            {t('diff.sync.preview')} <Badge>{t('diff.sync.statementCount', { count: plan.steps.reduce((s, x) => s + x.sqls.length, 0) })}</Badge>
           </div>
           <pre className="bg-card border border-border rounded p-3 text-xs max-h-64 overflow-auto whitespace-pre-wrap">
 {plan.steps.map((s) => `-- [${s.table}] ${s.description}\n${s.sqls.join('\n')}`).join('\n\n')}
@@ -201,7 +206,7 @@ export function SyncPanel({
 
       {logs.length > 0 && (
         <div className="mt-4">
-          <div className="text-xs text-muted-foreground mb-1">Execution log</div>
+          <div className="text-xs text-muted-foreground mb-1">{t('diff.sync.executionLog')}</div>
           <pre className="bg-card border border-border rounded p-3 text-[11px] max-h-48 overflow-auto">
 {logs.join('\n')}
           </pre>

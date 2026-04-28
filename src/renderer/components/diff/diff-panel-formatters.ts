@@ -1,5 +1,6 @@
 // 纯展示用的格式化工具，从 DiffPanel.tsx 抽出，便于复用与单元测试。
 import type { TableDataDiff } from '../../../shared/types'
+import type { Translator } from '@renderer/i18n'
 
 export type ComparePhase = 'idle' | 'loading-tables' | 'comparing' | 'done'
 
@@ -7,52 +8,71 @@ export function formatComparePhase(
   phase: ComparePhase,
   completedSharedTableCount: number,
   sharedTableCount: number,
-  pendingSharedTable?: string
+  pendingSharedTable: string | undefined,
+  t: Translator
 ): string {
-  if (phase === 'loading-tables') return 'Loading source and target table lists...'
+  if (phase === 'loading-tables') return t('diff.phase.loadingTables')
   if (phase === 'comparing') {
-    const base = `Comparing ${completedSharedTableCount}/${sharedTableCount} shared table(s)...`
-    return pendingSharedTable ? `${base} Pending: ${pendingSharedTable}` : base
+    const vars = { done: completedSharedTableCount, total: sharedTableCount }
+    return pendingSharedTable
+      ? t('diff.phase.comparingPending', { ...vars, pending: pendingSharedTable })
+      : t('diff.phase.comparing', vars)
   }
   if (phase === 'done') {
     return sharedTableCount === 0
-      ? 'Only source-only/target-only tables were found. Results are ready.'
-      : `Compared ${completedSharedTableCount}/${sharedTableCount} shared table(s).`
+      ? t('diff.phase.doneNoShared')
+      : t('diff.phase.done', { done: completedSharedTableCount, total: sharedTableCount })
   }
-  return 'Ready to compare.'
+  return t('diff.phase.ready')
 }
 
 export function formatCompareButtonLabel(
   phase: ComparePhase,
   completedSharedTableCount: number,
-  sharedTableCount: number
+  sharedTableCount: number,
+  t: Translator
 ): string {
-  if (phase === 'loading-tables') return 'Loading tables...'
-  if (phase === 'comparing') return `Comparing ${completedSharedTableCount}/${sharedTableCount}`
-  return 'Compare'
+  if (phase === 'loading-tables') return t('diff.toolbar.loadingTables')
+  if (phase === 'comparing')
+    return t('diff.toolbar.comparingProgress', {
+      done: completedSharedTableCount,
+      total: sharedTableCount
+    })
+  return t('diff.toolbar.compare')
 }
 
-export function formatCompareSetupSummary({
-  sourceConnectionName,
-  sourceDatabase,
-  targetConnectionName,
-  targetDatabase,
-  compareData
-}: {
-  sourceConnectionName?: string
-  sourceDatabase: string
-  targetConnectionName?: string
-  targetDatabase: string
-  compareData: boolean
-}): string {
+export function formatCompareSetupSummary(
+  {
+    sourceConnectionName,
+    sourceDatabase,
+    targetConnectionName,
+    targetDatabase,
+    compareData
+  }: {
+    sourceConnectionName?: string
+    sourceDatabase: string
+    targetConnectionName?: string
+    targetDatabase: string
+    compareData: boolean
+  },
+  t: Translator
+): string {
   if (!sourceConnectionName && !targetConnectionName && !sourceDatabase && !targetDatabase) {
-    return 'Choose source and target connections before running Compare.'
+    return t('diff.setupSummary.empty')
   }
 
-  const sourceLabel = [sourceConnectionName, sourceDatabase].filter(Boolean).join(' / ') || 'Source pending'
-  const targetLabel = [targetConnectionName, targetDatabase].filter(Boolean).join(' / ') || 'Target pending'
+  const sourceLabel =
+    [sourceConnectionName, sourceDatabase].filter(Boolean).join(' / ') ||
+    t('diff.setupSummary.sourcePending')
+  const targetLabel =
+    [targetConnectionName, targetDatabase].filter(Boolean).join(' / ') ||
+    t('diff.setupSummary.targetPending')
 
-  return `${sourceLabel} -> ${targetLabel} · row comparison ${compareData ? 'on' : 'off'}`
+  return t('diff.setupSummary.template', {
+    source: sourceLabel,
+    target: targetLabel,
+    state: compareData ? t('diff.setupSummary.stateOn') : t('diff.setupSummary.stateOff')
+  })
 }
 
 export function formatEndpointSelectionSummary(
@@ -64,15 +84,20 @@ export function formatEndpointSelectionSummary(
   return parts.length > 0 ? parts.join(' / ') : fallback
 }
 
-export function buildDatabaseOptions(connectionId: string, databases: string[], loading: boolean) {
+export function buildDatabaseOptions(
+  connectionId: string,
+  databases: string[],
+  loading: boolean,
+  t: Translator
+) {
   if (!connectionId) {
-    return [{ value: '', label: 'Select connection first' }]
+    return [{ value: '', label: t('diff.databaseOption.selectConnectionFirst') }]
   }
   if (loading) {
-    return [{ value: '', label: 'Loading databases...' }]
+    return [{ value: '', label: t('diff.databaseOption.loadingDatabases') }]
   }
   return [
-    { value: '', label: '— select —' },
+    { value: '', label: t('diff.databaseOption.placeholder') },
     ...databases.map((database) => ({ value: database, label: database }))
   ]
 }
@@ -99,8 +124,10 @@ export function formatIndexLine(
   return `${i.unique ? 'UNIQUE ' : ''}${i.name} (${i.columns.join(', ')})`
 }
 
-export function formatDataSummary(dataDiff: TableDataDiff): string {
-  if (!dataDiff.comparable) return 'row compare skipped'
+export function formatDataSummary(dataDiff: TableDataDiff, t: Translator): string {
+  if (!dataDiff.comparable) return t('diff.dataSummary.skipped')
   const totalDiffs = dataDiff.sourceOnly + dataDiff.targetOnly + dataDiff.modified
-  return totalDiffs === 0 ? 'rows identical' : `${totalDiffs} row diff(s)`
+  return totalDiffs === 0
+    ? t('diff.dataSummary.identical')
+    : t('diff.dataSummary.diffs', { count: totalDiffs })
 }

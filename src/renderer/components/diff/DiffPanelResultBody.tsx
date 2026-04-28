@@ -3,6 +3,7 @@ import type { ComparePhase } from './diff-panel-formatters'
 import { EmptyResultState } from './diff-panel-presentation'
 import { RowComparisonSection } from './RowComparisonSection'
 import { SchemaTabContent, StatusTabContent, TablesTabContent } from './DiffResultTabs'
+import { useI18n } from '@renderer/i18n'
 import type { DiffResultTab, TableCompareEntry, TableStatusFilter } from './diff-panel-utils'
 
 interface DiffPanelResultBodyProps {
@@ -64,6 +65,8 @@ export function DiffPanelResultBody({
   onOpenSource,
   onOpenTarget
 }: DiffPanelResultBodyProps) {
+  const { t } = useI18n()
+
   if (resultTab === 'tables') {
     return (
       <TablesTabContent
@@ -127,11 +130,11 @@ export function DiffPanelResultBody({
 
   return (
     <EmptyResultState
-      title="No content comparison results"
+      title={t('diff.presentation.noContentResults')}
       description={
         compareData
-          ? 'Row comparison is enabled, but there are no row-level results yet for the current diff.'
-          : 'Enable Compare rows before running Compare to inspect row-level changes here.'
+          ? t('diff.presentation.noContentYet')
+          : t('diff.presentation.enableCompareRows')
       }
     />
   )

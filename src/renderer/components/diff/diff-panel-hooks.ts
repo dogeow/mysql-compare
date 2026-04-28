@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { api, unwrap } from '@renderer/lib/api'
+import type { Translator } from '@renderer/i18n'
 import type { TableComparisonResult } from '../../../shared/types'
 import type { ComparePhase } from './diff-panel-formatters'
 import {
@@ -32,6 +33,7 @@ interface UseDiffComparisonArgs {
   compareData: boolean
   tableCompareConcurrency: number
   showToast: ShowToast
+  t: Translator
   onBeforeCompare?: () => void
 }
 
@@ -108,6 +110,7 @@ export function useDiffComparison({
   compareData,
   tableCompareConcurrency,
   showToast,
+  t,
   onBeforeCompare
 }: UseDiffComparisonArgs): UseDiffComparisonResult {
   const [comparePhase, setComparePhase] = useState<ComparePhase>('idle')
@@ -121,7 +124,7 @@ export function useDiffComparison({
 
   const runCompare = async () => {
     if (!sourceConnectionId || !targetConnectionId || !sourceDatabase || !targetDatabase) {
-      showToast('Select source/target connection and database', 'error')
+      showToast(t('diff.toast.selectEndpoints'), 'error')
       return
     }
 
@@ -229,12 +232,12 @@ export function useDiffComparison({
       setComparePhase('done')
       if (usingCompatibilityMode) {
         showToast(
-          'Using compatibility mode for this session. Restart the app to re-enable the dedicated incremental diff IPC.',
+          t('diff.toast.compatibilityMode'),
           'info'
         )
       }
       if (failedTables > 0) {
-        showToast(`Failed to compare ${failedTables} table(s)`, 'error')
+        showToast(t('diff.toast.failedTables', { count: failedTables }), 'error')
       }
     } catch (err) {
       if (compareRunIdRef.current !== runId) return

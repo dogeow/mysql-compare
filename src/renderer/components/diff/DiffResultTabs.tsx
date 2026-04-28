@@ -4,6 +4,7 @@ import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { Select } from '@renderer/components/ui/select'
+import { useI18n } from '@renderer/i18n'
 import type { TableDiff } from '../../../shared/types'
 import {
   formatColumnLine,
@@ -36,22 +37,23 @@ export function TablesTabContent({
   sharedTableCount,
   phase
 }: TablesTabContentProps) {
+  const { t } = useI18n()
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
         <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {sourceTables.length} source tables
+          {t('diff.result.sourceTables', { count: sourceTables.length })}
         </Badge>
         <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {sharedTableCount} shared tables
+          {t('diff.result.sharedTables', { count: sharedTableCount })}
         </Badge>
         <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {targetTables.length} target tables
+          {t('diff.result.targetTables', { count: targetTables.length })}
         </Badge>
       </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-2">
-        <TableListPanel title="Source tables" tables={sourceTables} phase={phase} />
-        <TableListPanel title="Target tables" tables={targetTables} phase={phase} />
+        <TableListPanel title={t('diff.result.sourcePanelTitle')} tables={sourceTables} phase={phase} />
+        <TableListPanel title={t('diff.result.targetPanelTitle')} tables={targetTables} phase={phase} />
       </div>
     </div>
   )
@@ -98,6 +100,7 @@ export function StatusTabContent({
   onOpenSource,
   onOpenTarget
 }: StatusTabContentProps) {
+  const { t } = useI18n()
   return (
     <div className="space-y-3">
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_auto] lg:items-start">
@@ -109,43 +112,44 @@ export function StatusTabContent({
                 comparePhase,
                 completedSharedTableCount,
                 sharedTableCount,
-                pendingSharedTable
+                pendingSharedTable,
+                t
               )}
             </span>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
             <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-              {comparisonEntries.length} tracked
+              {t('diff.result.tracked', { count: comparisonEntries.length })}
             </Badge>
             <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-              {sharedTableCount} shared
+              {t('diff.result.shared', { count: sharedTableCount })}
             </Badge>
-            {hasCompareErrors && <Badge variant="destructive">errors present</Badge>}
+            {hasCompareErrors && <Badge variant="destructive">{t('diff.result.errorsPresent')}</Badge>}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground lg:justify-end">
           <Input
             value={tableSearchQuery}
             onChange={(event) => onSearchChange(event.target.value)}
-            placeholder="Search table"
+            placeholder={t('diff.result.searchTable')}
             className="h-8 w-40 text-xs"
           />
           {tableSearchQuery && (
             <Button size="sm" variant="ghost" className="h-8 px-2" onClick={onClearSearch}>
-              Clear
+              {t('common.clear')}
             </Button>
           )}
-          <span>Status</span>
+          <span>{t('common.status')}</span>
           <Select
             className="w-36"
             value={statusFilter}
             onChange={(event) => onStatusFilterChange(event.target.value as TableStatusFilter)}
             options={[
-              { value: 'all', label: 'All' },
-              { value: 'comparing', label: 'Comparing' },
-              { value: 'changed', label: 'Only changed' },
-              { value: 'schema-changed', label: 'Structure changed' },
-              { value: 'row-changed', label: 'Content changed' }
+              { value: 'all', label: t('diff.result.statusAll') },
+              { value: 'comparing', label: t('diff.result.statusComparing') },
+              { value: 'changed', label: t('diff.result.statusOnlyChanged') },
+              { value: 'schema-changed', label: t('diff.result.statusStructureChanged') },
+              { value: 'row-changed', label: t('diff.result.statusContentChanged') }
             ]}
           />
           <Badge>{filteredComparisonEntries.length}</Badge>
@@ -163,8 +167,8 @@ export function StatusTabContent({
       ) : (
         <div className="text-xs text-muted-foreground">
           {comparePhase === 'loading-tables'
-            ? 'Loading source and target table lists...'
-            : 'No tables match the current filter.'}
+            ? t('diff.result.loadingTables')
+            : t('diff.result.noTablesMatch')}
         </div>
       )}
     </div>
@@ -186,14 +190,15 @@ export function SchemaTabContent({
   onOpenSource,
   onOpenTarget
 }: SchemaTabContentProps) {
+  const { t } = useI18n()
   if (schemaDiffs.length === 0) {
     return (
       <EmptyResultState
-        title="No structure differences"
+        title={t('diff.result.noStructureDiffs')}
         description={
           hasRowComparisonResults
-            ? 'Schema matches on both sides. Switch to the Content diff tab to inspect row-level changes.'
-            : 'No schema or presence differences were found in the current result set.'
+            ? t('diff.result.schemaMatchesContentTab')
+            : t('diff.result.noSchemaOrPresence')
         }
       />
     )
@@ -207,8 +212,8 @@ export function SchemaTabContent({
             <strong className="text-sm">{td.table}</strong>
             <KindBadge kind={td.kind} />
             <span className="mr-auto text-[10px] text-muted-foreground">
-              {td.columnDiffs.length} column diff(s) · {td.indexDiffs.length} index diff(s)
-              {td.dataDiff && ` · ${formatDataSummary(td.dataDiff)}`}
+              {td.columnDiffs.length} {t('diff.result.columnDiffs')} · {td.indexDiffs.length} {t('diff.result.indexDiffs')}
+              {td.dataDiff && ` · ${formatDataSummary(td.dataDiff, t)}`}
             </span>
             <TableOpenActions
               compareAvailable={td.kind === 'modified'}
@@ -222,11 +227,11 @@ export function SchemaTabContent({
           {td.columnDiffs.length > 0 && (
             <div className="grid grid-cols-1 gap-3 p-3 text-xs xl:grid-cols-2">
               <DiffColumn
-                title="Source"
+                title={t('diff.result.sourceColumns')}
                 items={td.columnDiffs.map((d) => formatColumnLine(d.source, d.kind, 'source'))}
               />
               <DiffColumn
-                title="Target"
+                title={t('diff.result.targetColumns')}
                 items={td.columnDiffs.map((d) => formatColumnLine(d.target, d.kind, 'target'))}
               />
             </div>
@@ -234,11 +239,11 @@ export function SchemaTabContent({
           {td.indexDiffs.length > 0 && (
             <div className="grid grid-cols-1 gap-3 px-3 pb-3 text-xs xl:grid-cols-2">
               <DiffColumn
-                title="Source indexes"
+                title={t('diff.result.sourceIndexes')}
                 items={td.indexDiffs.map((d) => formatIndexLine(d.source, d.kind, 'source'))}
               />
               <DiffColumn
-                title="Target indexes"
+                title={t('diff.result.targetIndexes')}
                 items={td.indexDiffs.map((d) => formatIndexLine(d.target, d.kind, 'target'))}
               />
             </div>

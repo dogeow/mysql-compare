@@ -2,6 +2,7 @@ import { AlertCircle, CheckCircle2, CircleDashed, LoaderCircle } from 'lucide-re
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import { cn } from '@renderer/lib/utils'
+import { useI18n, type Translator } from '@renderer/i18n'
 import type { TableRowComparison } from '../../../shared/types'
 import {
   hasNoRowDifferences,
@@ -26,8 +27,9 @@ export function ComparisonStatusPanel({
   onOpenSource,
   onOpenTarget
 }: ComparisonStatusPanelProps) {
+  const { t } = useI18n()
   if (entries.length === 0) {
-    return <div className="text-xs text-muted-foreground">No tables match the current filter.</div>
+    return <div className="text-xs text-muted-foreground">{t('diff.result.noTablesMatch')}</div>
   }
 
   const selectedEntry = entries.find((entry) => entry.table === selectedTable) ?? entries[0] ?? null
@@ -63,6 +65,7 @@ function CompactComparisonCard({
   selected: boolean
   onSelect: () => void
 }) {
+  const { t } = useI18n()
   return (
     <button
       type="button"
@@ -80,14 +83,16 @@ function CompactComparisonCard({
           <div className="flex items-center gap-2 min-w-0">
             <span className="truncate font-medium">{entry.table}</span>
             <span className="ml-auto text-[10px] text-muted-foreground whitespace-nowrap">
-              {formatEntryStatus(entry)}
+              {formatEntryStatus(entry, t)}
             </span>
           </div>
           <div className="mt-1 flex flex-wrap items-center gap-1.5">
             <EntrySummaryBadges entry={entry} />
           </div>
         </div>
-        <span className="text-[11px] text-muted-foreground">{selected ? 'Viewing' : 'Details'}</span>
+        <span className="text-[11px] text-muted-foreground">
+          {selected ? t('diff.status.viewing') : t('diff.status.details')}
+        </span>
       </div>
     </button>
   )
@@ -104,12 +109,13 @@ function ComparisonDetailDrawer({
   onOpenSource?: () => void
   onOpenTarget?: () => void
 }) {
+  const { t } = useI18n()
   if (!entry) {
     return (
       <div className="rounded border border-dashed border-border/60 bg-card/20 px-4 py-6 text-sm xl:sticky xl:top-4 xl:max-h-[calc(100vh-7rem)] xl:self-start xl:overflow-auto">
-        <div className="font-medium text-foreground">No table selected</div>
+        <div className="font-medium text-foreground">{t('diff.status.noTableSelected')}</div>
         <div className="mt-1 text-xs text-muted-foreground">
-          Select a table from the status list to inspect schema and row comparison details here.
+          {t('diff.status.selectTablePrompt')}
         </div>
       </div>
     )
@@ -133,21 +139,21 @@ function ComparisonDetailDrawer({
           </div>
         )}
         <div className="rounded-md bg-card/70 px-3 py-2">
-          <div className="mb-1 text-[11px] font-medium text-muted-foreground">Summary</div>
-          <div className="text-[11px] text-muted-foreground">{formatEntryDetailSummary(entry)}</div>
+          <div className="mb-1 text-[11px] font-medium text-muted-foreground">{t('common.summary')}</div>
+          <div className="text-[11px] text-muted-foreground">{formatEntryDetailSummary(entry, t)}</div>
         </div>
         {entry.tableDiff && (
           <div className="rounded-md bg-card/70 px-3 py-2">
-            <div className="mb-1 text-[11px] font-medium text-muted-foreground">Structure</div>
+            <div className="mb-1 text-[11px] font-medium text-muted-foreground">{t('common.structure')}</div>
             <div className="text-[11px] text-muted-foreground">
-              {entry.tableDiff.columnDiffs.length} column diff(s) · {entry.tableDiff.indexDiffs.length} index diff(s)
+              {t('diff.status.columnDiffCount', { count: entry.tableDiff.columnDiffs.length })} · {t('diff.status.indexDiffCount', { count: entry.tableDiff.indexDiffs.length })}
             </div>
           </div>
         )}
         {entry.rowComparison && (
           <div className="rounded-md bg-card/70 px-3 py-2">
-            <div className="mb-1 text-[11px] font-medium text-muted-foreground">Content</div>
-            <div className="text-[11px] text-muted-foreground">{formatRowComparisonSummary(entry.rowComparison)}</div>
+            <div className="mb-1 text-[11px] font-medium text-muted-foreground">{t('common.content')}</div>
+            <div className="text-[11px] text-muted-foreground">{formatRowComparisonSummary(entry.rowComparison, t)}</div>
           </div>
         )}
         <ComparisonActionButtons
@@ -164,10 +170,11 @@ function ComparisonDetailDrawer({
 }
 
 function EntrySummaryBadges({ entry }: { entry: TableCompareEntry }) {
-  const items = getEntrySummaryBadges(entry)
+  const { t } = useI18n()
+  const items = getEntrySummaryBadges(entry, t)
 
   if (items.length === 0) {
-    return <Badge className="border border-border/60 bg-card/70 text-muted-foreground">ready</Badge>
+    return <Badge className="border border-border/60 bg-card/70 text-muted-foreground">{t('diff.status.ready')}</Badge>
   }
 
   return items.map((item) => (
@@ -182,96 +189,102 @@ function EntrySummaryBadges({ entry }: { entry: TableCompareEntry }) {
 }
 
 function getEntrySummaryBadges(
-  entry: TableCompareEntry
+  entry: TableCompareEntry,
+  t: Translator
 ): Array<{ label: string; variant: 'default' | 'info' | 'warning' | 'destructive' | 'success' }> {
   const items: Array<{ label: string; variant: 'default' | 'info' | 'warning' | 'destructive' | 'success' }> = []
 
   if (entry.status === 'error') {
-    items.push({ label: 'error', variant: 'destructive' })
+    items.push({ label: t('diff.status.error'), variant: 'destructive' })
     return items
   }
 
   if (!entry.sourceExists) {
-    items.push({ label: 'target only', variant: 'warning' })
+    items.push({ label: t('diff.status.targetOnly'), variant: 'warning' })
     return items
   }
 
   if (!entry.targetExists) {
-    items.push({ label: 'source only', variant: 'info' })
+    items.push({ label: t('diff.status.sourceOnly'), variant: 'info' })
     return items
   }
 
   if (entry.status === 'comparing') {
-    items.push({ label: 'running', variant: 'info' })
+    items.push({ label: t('diff.status.running'), variant: 'info' })
   }
 
   if (entry.tableDiff && hasSchemaOrPresenceDiff(entry.tableDiff)) {
-    items.push({ label: 'schema', variant: 'destructive' })
+    items.push({ label: t('diff.status.schema'), variant: 'destructive' })
   }
 
   if (entry.rowComparison) {
     if (!entry.rowComparison.dataDiff.comparable) {
-      items.push({ label: 'rows skipped', variant: 'warning' })
+      items.push({ label: t('diff.status.rowsSkipped'), variant: 'warning' })
     } else if (!hasNoRowDifferences(entry.rowComparison)) {
-      items.push({ label: 'rows changed', variant: 'destructive' })
+      items.push({ label: t('diff.status.rowsChanged'), variant: 'destructive' })
     } else if (!entry.tableDiff) {
-      items.push({ label: 'identical', variant: 'success' })
+      items.push({ label: t('diff.status.identical'), variant: 'success' })
     }
   }
 
   if (items.length === 0 && entry.status === 'queued') {
-    items.push({ label: 'queued', variant: 'default' })
+    items.push({ label: t('diff.status.queued'), variant: 'default' })
   }
 
   return items
 }
 
-function formatEntryDetailSummary(entry: TableCompareEntry): string {
+function formatEntryDetailSummary(entry: TableCompareEntry, t: Translator): string {
   if (entry.status === 'error') {
-    return 'This table failed during compare. Expand the error and retry the compare run after the underlying issue is resolved.'
+    return t('diff.status.errorRetryHint')
   }
 
   if (!entry.sourceExists) {
-    return 'Table exists only on the target side.'
+    return t('diff.status.tableTargetOnly')
   }
 
   if (!entry.targetExists) {
-    return 'Table exists only on the source side.'
+    return t('diff.status.tableSourceOnly')
   }
 
   const detailParts: string[] = []
 
   if (entry.tableDiff) {
     detailParts.push(
-      `${entry.tableDiff.columnDiffs.length} column diff(s)`,
-      `${entry.tableDiff.indexDiffs.length} index diff(s)`
+      t('diff.status.columnDiffCount', { count: entry.tableDiff.columnDiffs.length }),
+      t('diff.status.indexDiffCount', { count: entry.tableDiff.indexDiffs.length })
     )
   }
 
   if (entry.rowComparison) {
     const { dataDiff } = entry.rowComparison
     if (!dataDiff.comparable) {
-      detailParts.push('row compare skipped')
+      detailParts.push(t('diff.status.rowCompareSkipped'))
     } else {
       detailParts.push(
-        `${dataDiff.modified} modified`,
-        `${dataDiff.sourceOnly} source only`,
-        `${dataDiff.targetOnly} target only`,
-        `${dataDiff.identical} identical`
+        t('diff.status.modifiedCount', { count: dataDiff.modified }),
+        t('diff.status.sourceOnlyCount', { count: dataDiff.sourceOnly }),
+        t('diff.status.targetOnlyCount', { count: dataDiff.targetOnly }),
+        t('diff.status.identicalCount', { count: dataDiff.identical })
       )
     }
   }
 
-  return detailParts.length > 0 ? detailParts.join(' · ') : 'No schema or row differences detected for this table.'
+  return detailParts.length > 0 ? detailParts.join(' · ') : t('diff.status.noDifferences')
 }
 
-function formatRowComparisonSummary(rowComparison: TableRowComparison): string {
+function formatRowComparisonSummary(rowComparison: TableRowComparison, t: Translator): string {
   const { dataDiff } = rowComparison
   if (!dataDiff.comparable) {
-    return dataDiff.reason || 'Row comparison skipped.'
+    return dataDiff.reason || t('diff.status.rowComparisonSkipped')
   }
 
-  return `${dataDiff.modified} modified · ${dataDiff.sourceOnly} source only · ${dataDiff.targetOnly} target only · ${dataDiff.identical} identical`
+  return [
+    t('diff.status.modifiedCount', { count: dataDiff.modified }),
+    t('diff.status.sourceOnlyCount', { count: dataDiff.sourceOnly }),
+    t('diff.status.targetOnlyCount', { count: dataDiff.targetOnly }),
+    t('diff.status.identicalCount', { count: dataDiff.identical })
+  ].join(' · ')
 }
 
 function TableStatusIcon({ status }: { status: TableCompareEntry['status'] }) {
@@ -287,16 +300,16 @@ function TableStatusIcon({ status }: { status: TableCompareEntry['status'] }) {
   return <CircleDashed className="h-3.5 w-3.5 text-muted-foreground" />
 }
 
-function formatEntryStatus(entry: TableCompareEntry): string {
-  if (entry.status === 'error') return 'failed'
-  if (!entry.sourceExists) return 'target only'
-  if (!entry.targetExists) return 'source only'
-  if (entry.status === 'queued') return 'queued'
-  if (entry.status === 'comparing') return 'comparing'
-  if (entry.rowComparison && !entry.rowComparison.dataDiff.comparable) return 'row skipped'
-  if (entry.rowComparison && hasNoRowDifferences(entry.rowComparison) && !entry.tableDiff) return 'identical'
-  if (!entry.rowComparison && !entry.tableDiff) return 'no differences'
-  return 'ready'
+function formatEntryStatus(entry: TableCompareEntry, t: Translator): string {
+  if (entry.status === 'error') return t('diff.status.failed')
+  if (!entry.sourceExists) return t('diff.status.targetOnly')
+  if (!entry.targetExists) return t('diff.status.sourceOnly')
+  if (entry.status === 'queued') return t('diff.status.queued')
+  if (entry.status === 'comparing') return t('diff.status.comparing')
+  if (entry.rowComparison && !entry.rowComparison.dataDiff.comparable) return t('diff.status.rowSkipped')
+  if (entry.rowComparison && hasNoRowDifferences(entry.rowComparison) && !entry.tableDiff) return t('diff.status.identical')
+  if (!entry.rowComparison && !entry.tableDiff) return t('diff.status.noDifferencesShort')
+  return t('diff.status.ready')
 }
 
 function ComparisonActionButtons({

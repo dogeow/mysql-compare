@@ -3,6 +3,7 @@ import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
+import { useI18n } from '@renderer/i18n'
 import type { ConnectionConfig, DbEngine, SafeConnection } from '../../../shared/types'
 import { DEFAULT_PORT, parsePortValue } from './connection-dialog-utils'
 
@@ -27,29 +28,30 @@ export function ConnectionDialogForm({
   onSSHKeyDraggingChange,
   sshKeyInputRef
 }: Props) {
+  const { t } = useI18n()
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Field label="Engine">
+      <Field label={t('connection.form.engine')}>
         <select
           value={form.engine}
           onChange={(event) => onChange('engine', event.target.value as DbEngine)}
           className="flex h-9 w-full rounded-md border border-input bg-background px-2 text-sm"
         >
-          <option value="mysql">MySQL</option>
-          <option value="postgres">PostgreSQL</option>
+          <option value="mysql">{t('connection.form.mysql')}</option>
+          <option value="postgres">{t('connection.form.postgres')}</option>
         </select>
       </Field>
-      <Field label="Name">
+      <Field label={t('common.name')}>
         <Input value={form.name} onChange={(event) => onChange('name', event.target.value)} />
       </Field>
-      <Field label="Group">
+      <Field label={t('connection.form.group')}>
         <Input value={form.group || ''} onChange={(event) => onChange('group', event.target.value)} />
       </Field>
       <div />
-      <Field label="Host">
+      <Field label={t('connection.form.host')}>
         <Input value={form.host} onChange={(event) => onChange('host', event.target.value)} />
       </Field>
-      <Field label="Port">
+      <Field label={t('connection.form.port')}>
         <Input
           type="number"
           min={1}
@@ -60,17 +62,17 @@ export function ConnectionDialogForm({
           }
         />
       </Field>
-      <Field label="Username">
+      <Field label={t('connection.form.username')}>
         <Input value={form.username} onChange={(event) => onChange('username', event.target.value)} />
       </Field>
-      <Field label={`Password${connection?.hasPassword ? ' (leave blank to keep)' : ''}`}>
+      <Field label={connection?.hasPassword ? t('connection.form.passwordKeep') : t('connection.form.password')}>
         <Input
           type="password"
           value={form.password || ''}
           onChange={(event) => onChange('password', event.target.value)}
         />
       </Field>
-      <Field label="Default Database">
+      <Field label={t('connection.form.defaultDatabase')}>
         <Input
           value={form.database || ''}
           onChange={(event) => onChange('database', event.target.value)}
@@ -85,19 +87,19 @@ export function ConnectionDialogForm({
           id="useSSH"
         />
         <label htmlFor="useSSH" className="text-sm">
-          Use SSH Tunnel
+          {t('connection.form.useSshTunnel')}
         </label>
       </div>
 
       {form.useSSH && (
         <>
-          <Field label="SSH Host">
+          <Field label={t('connection.form.sshHost')}>
             <Input
               value={form.sshHost || ''}
               onChange={(event) => onChange('sshHost', event.target.value)}
             />
           </Field>
-          <Field label="SSH Port">
+          <Field label={t('connection.form.sshPort')}>
             <Input
               type="number"
               min={1}
@@ -106,13 +108,13 @@ export function ConnectionDialogForm({
               onChange={(event) => onChange('sshPort', parsePortValue(event.target.value, 22))}
             />
           </Field>
-          <Field label="SSH Username">
+          <Field label={t('connection.form.sshUsername')}>
             <Input
               value={form.sshUsername || ''}
               onChange={(event) => onChange('sshUsername', event.target.value)}
             />
           </Field>
-          <Field label={`SSH Password${connection?.hasSSHPassword ? ' (leave blank to keep)' : ''}`}>
+          <Field label={connection?.hasSSHPassword ? t('connection.form.sshPasswordKeep') : t('connection.form.sshPassword')}>
             <Input
               type="password"
               value={form.sshPassword || ''}
@@ -120,7 +122,7 @@ export function ConnectionDialogForm({
             />
           </Field>
           <Field
-            label={`SSH Private Key${connection?.hasSSHPrivateKey ? ' (leave blank to keep)' : ''}`}
+            label={connection?.hasSSHPrivateKey ? t('connection.form.sshPrivateKeyKeep') : t('connection.form.sshPrivateKey')}
             className="col-span-2"
           >
             <input
@@ -147,14 +149,14 @@ export function ConnectionDialogForm({
               onDrop={onSSHKeyDrop}
             >
               <div className="flex flex-wrap items-center justify-between gap-2">
-                <span>Drop a private key file here, or choose a file.</span>
+                <span>{t('connection.form.dropKeyHint')}</span>
                 <Button
                   type="button"
                   variant="outline"
                   size="sm"
                   onClick={() => sshKeyInputRef.current?.click()}
                 >
-                  Choose File
+                  {t('connection.form.chooseFile')}
                 </Button>
               </div>
             </div>
@@ -166,7 +168,7 @@ export function ConnectionDialogForm({
               className="w-full rounded-md border border-input bg-background p-2 text-xs font-mono"
             />
           </Field>
-          <Field label="Key Passphrase">
+          <Field label={t('connection.form.keyPassphrase')}>
             <Input
               type="password"
               value={form.sshPassphrase || ''}

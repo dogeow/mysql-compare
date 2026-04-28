@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { api, unwrap } from '@renderer/lib/api'
+import { useI18n } from '@renderer/i18n'
 import type { SafeConnection, TableSchema } from '../../../shared/types'
 import { SidebarOverlays } from './SidebarOverlays'
 import { SidebarTree } from './SidebarTree'
@@ -46,6 +47,7 @@ function loadStoredSidebarWidth(): number {
 export function Sidebar() {
   const { connections, refresh, remove } = useConnectionStore()
   const { rightView, setRightView, renameTableTabs, closeTableTabs, showToast } = useUIStore()
+  const { t } = useI18n()
   const [keyword, setKeyword] = useState('')
   const [editing, setEditing] = useState<SafeConnection | null>(null)
   const [creating, setCreating] = useState(false)
@@ -289,7 +291,7 @@ export function Sidebar() {
     if (!renameDialog) return
     const nextName = renameDraft.trim()
     if (!nextName) {
-      showToast('New table name is required', 'error')
+      showToast(t('sidebar.toast.newTableNameRequired'), 'error')
       return
     }
     setActionBusy(true)
@@ -309,7 +311,7 @@ export function Sidebar() {
         renameDialog.table,
         result.table
       )
-      showToast(`Renamed to ${result.table}`, 'success')
+      showToast(t('sidebar.toast.renamedTo', { table: result.table }), 'success')
       setRenameDialog(null)
     } catch (err) {
       showToast((err as Error).message, 'error')
@@ -321,7 +323,7 @@ export function Sidebar() {
   const copyTable = async (menu: TableMenuState) => {
     setTableMenu(null)
     const targetTable = `${menu.table}_copy`
-    if (!confirm(`Copy "${menu.table}" and its data to "${targetTable}"?`)) return
+    if (!confirm(t('sidebar.confirm.copyTable', { table: menu.table, targetTable }))) return
     setActionBusy(true)
     try {
       const result = await unwrap(
@@ -333,7 +335,7 @@ export function Sidebar() {
         })
       )
       await refreshDatabase(menu.connection, menu.database)
-      showToast(`Copied to ${result.table}`, 'success')
+      showToast(t('sidebar.toast.copiedTo', { table: result.table }), 'success')
     } catch (err) {
       showToast((err as Error).message, 'error')
     } finally {
@@ -370,7 +372,7 @@ export function Sidebar() {
 
   const dropTable = async (menu: TableMenuState) => {
     setTableMenu(null)
-    if (!confirm(`Drop table "${menu.table}"? This cannot be undone.`)) return
+    if (!confirm(t('sidebar.confirm.dropTable', { table: menu.table }))) return
     setActionBusy(true)
     try {
       await unwrap(
@@ -382,7 +384,7 @@ export function Sidebar() {
       )
       await refreshDatabase(menu.connection, menu.database)
       closeTableTabs(menu.connection.id, menu.database, menu.table)
-      showToast(`Dropped table ${menu.table}`, 'success')
+      showToast(t('sidebar.toast.droppedTable', { table: menu.table }), 'success')
     } catch (err) {
       showToast((err as Error).message, 'error')
     } finally {
@@ -391,9 +393,9 @@ export function Sidebar() {
   }
 
   const onDelete = async (conn: SafeConnection) => {
-    if (!confirm(`Delete connection "${conn.name}"?`)) return
+    if (!confirm(t('sidebar.confirm.deleteConnection', { name: conn.name }))) return
     await remove(conn.id)
-    showToast('Connection deleted', 'success')
+    showToast(t('sidebar.toast.connectionDeleted'), 'success')
   }
 
   const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -461,7 +463,7 @@ export function Sidebar() {
         <div
           role="separator"
           aria-orientation="vertical"
-          aria-label="Resize sidebar"
+          aria-label={t('sidebar.resizeSidebar')}
           aria-valuemin={MIN_SIDEBAR_WIDTH}
           aria-valuemax={getSidebarMaxWidth()}
           aria-valuenow={sidebarWidth}
@@ -503,7 +505,7 @@ export function Sidebar() {
         }}
         onCopyCreateSQL={() => {
           navigator.clipboard.writeText(createSQLDialog?.sql ?? '')
-          showToast('SQL copied', 'success')
+          showToast(t('common.sqlCopied'), 'success')
         }}
         exportDialog={exportDialog}
         onExportDialogOpenChange={(open) => {

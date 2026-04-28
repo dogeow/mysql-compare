@@ -8,8 +8,9 @@ import { TableStructureView } from '@renderer/components/table-view/TableStructu
 import { DiffPanel } from '@renderer/components/diff/DiffPanel'
 import { TableCompareView } from '@renderer/components/diff/TableCompareView'
 import { SQLQueryView } from '@renderer/components/sql/SQLQueryView'
-import { useUIStore, type WorkspaceTab } from '@renderer/store/ui-store'
+import { useUIStore, type WorkspaceTab, type WorkspaceView } from '@renderer/store/ui-store'
 import { cn } from '@renderer/lib/utils'
+import { useI18n, type Translator } from '@renderer/i18n'
 
 type TableTabKind = 'data' | 'structure' | 'info'
 
@@ -17,8 +18,23 @@ function isTableTabKind(value: string): value is TableTabKind {
   return value === 'data' || value === 'structure' || value === 'info'
 }
 
+function getTabDisplayTitle(view: WorkspaceView, t: Translator): string {
+  if (view.kind === 'diff') return t('app.diffSync')
+  if (view.kind === 'sql') {
+    const prefix = t('workspace.tabTitle.sqlPrefix')
+    return view.connectionName
+      ? `${prefix} · ${view.database} @ ${view.connectionName}`
+      : `${prefix} · ${view.database}`
+  }
+  if (view.kind === 'table-compare') {
+    return `${t('workspace.tabTitle.comparePrefix')} · ${view.table}`
+  }
+  return view.table
+}
+
 export function Workspace() {
   const { workspaceTabs, activeTabId, rightView, setActiveTab, closeTab } = useUIStore()
+  const { t } = useI18n()
   const [tableTabs, setTableTabs] = useState<Record<string, TableTabKind>>({})
   const previousTabsRef = useRef<WorkspaceTab[]>([])
 
@@ -55,7 +71,7 @@ export function Workspace() {
   if (!activeTab || rightView.kind === 'empty') {
     return (
       <div className="flex-1 flex items-center justify-center text-muted-foreground text-sm">
-        Select a table from the left, or open Diff &amp; Sync.
+        {t('workspace.selectTablePrompt')}
       </div>
     )
   }
@@ -87,7 +103,7 @@ export function Workspace() {
                 ) : (
                   <TableIcon className="h-3.5 w-3.5 shrink-0" />
                 )}
-                <span className="truncate max-w-48">{tab.title}</span>
+                <span className="truncate max-w-48">{getTabDisplayTitle(tab.view, t)}</span>
               </button>
               <button
                 type="button"
@@ -96,7 +112,7 @@ export function Workspace() {
                   event.stopPropagation()
                   closeTab(tab.id)
                 }}
-                title="Close tab"
+                title={t('workspace.closeTab')}
               >
                 <X className="h-3.5 w-3.5" />
               </button>
@@ -143,7 +159,7 @@ export function Workspace() {
                       <strong>{tab.view.table}</strong>
                     </div>
                     <Button variant="ghost" size="sm" onClick={() => closeTab(tab.id)}>
-                      Close
+                      {t('common.close')}
                     </Button>
                   </div>
                   <Tabs
@@ -156,9 +172,9 @@ export function Workspace() {
                       }))
                     }
                     items={[
-                      { value: 'data', label: 'Data' },
-                      { value: 'structure', label: 'Structure' },
-                      { value: 'info', label: 'Info' }
+                      { value: 'data', label: t('common.data') },
+                      { value: 'structure', label: t('common.structure') },
+                      { value: 'info', label: t('common.info') }
                     ]}
                   />
                   <div className="flex-1 overflow-hidden">

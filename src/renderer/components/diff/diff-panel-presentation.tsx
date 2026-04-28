@@ -2,6 +2,7 @@
 import { CheckCircle2, CircleDashed, LoaderCircle } from 'lucide-react'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
+import { useI18n } from '@renderer/i18n'
 import type { ComparePhase } from './diff-panel-formatters'
 
 export function ComparePhaseIcon({ phase }: { phase: ComparePhase }) {
@@ -15,9 +16,12 @@ export function ComparePhaseIcon({ phase }: { phase: ComparePhase }) {
 }
 
 export function KindBadge({ kind }: { kind: string }) {
-  if (kind === 'only-in-source') return <Badge variant="info">only in source</Badge>
-  if (kind === 'only-in-target') return <Badge variant="warning">only in target</Badge>
-  return <Badge variant="destructive">modified</Badge>
+  const { t } = useI18n()
+  if (kind === 'only-in-source')
+    return <Badge variant="info">{t('diff.presentation.onlyInSource')}</Badge>
+  if (kind === 'only-in-target')
+    return <Badge variant="warning">{t('diff.presentation.onlyInTarget')}</Badge>
+  return <Badge variant="destructive">{t('diff.presentation.modified')}</Badge>
 }
 
 export function EmptyResultState({ title, description }: { title: string; description: string }) {
@@ -46,21 +50,22 @@ export function TableOpenActions({
   onOpenTarget: () => void
   className?: string
 }) {
+  const { t } = useI18n()
   return (
     <div className={className ?? 'flex flex-wrap gap-2'}>
       {compareAvailable && onOpenCompare && (
         <Button size="sm" variant="outline" onClick={onOpenCompare}>
-          Open Compare
+          {t('diff.presentation.openCompare')}
         </Button>
       )}
       {sourceAvailable && (
         <Button size="sm" variant="ghost" onClick={onOpenSource}>
-          Open Source
+          {t('diff.presentation.openSource')}
         </Button>
       )}
       {targetAvailable && (
         <Button size="sm" variant="ghost" onClick={onOpenTarget}>
-          Open Target
+          {t('diff.presentation.openTarget')}
         </Button>
       )}
     </div>

@@ -9,6 +9,7 @@ import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Badge } from '@renderer/components/ui/badge'
 import { useUIStore } from '@renderer/store/ui-store'
 import { formatCellValue, pickPK } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 import { ExportTableDialog } from './ExportTableDialog'
 import type { ColumnInfo, QueryRowsResult } from '../../../shared/types'
 import { RowEditDialog } from './RowEditDialog'
@@ -21,6 +22,7 @@ interface Props {
 
 export function TableDataView({ connectionId, database, table }: Props) {
   const { showToast } = useUIStore()
+  const { t } = useI18n()
   const [data, setData] = useState<QueryRowsResult | null>(null)
   const [page, setPage] = useState(1)
   const [pageSize] = useState(100)
@@ -99,14 +101,14 @@ export function TableDataView({ connectionId, database, table }: Props) {
   const onDeleteSelected = async () => {
     if (!data || selected.size === 0) return
     if (!data.hasPrimaryKey) {
-      showToast('Refusing: this table has no primary key', 'error')
+      showToast(t('tableData.refuseNoPrimaryKey'), 'error')
       return
     }
-    if (!confirm(`Delete ${selected.size} row(s)? This cannot be undone.`)) return
+    if (!confirm(t('tableData.confirmDeleteRows', { count: selected.size }))) return
     const pkRows = Array.from(selected).map((i) => pickPK(data.rows[i]!, data.primaryKey))
     try {
       const r = await unwrap(api.db.deleteRows({ connectionId, database, table, pkRows }))
-      showToast(`Deleted ${(r as { affectedRows: number }).affectedRows} row(s)`, 'success')
+      showToast(t('tableData.rowsDeleted', { count: (r as { affectedRows: number }).affectedRows }), 'success')
       refresh()
     } catch (err) {
       showToast((err as Error).message, 'error')
@@ -129,7 +131,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
         <Input
           value={where}
           onChange={(e) => setWhere(e.target.value)}
-          placeholder="WHERE clause, e.g.  status = 1 AND id > 100"
+          placeholder={t('tableData.whereClausePlaceholder')}
           className="flex-1 h-8 text-xs"
           onKeyDown={(e) => {
             if (e.key === 'Enter') applyWhere()
@@ -141,17 +143,17 @@ export function TableDataView({ connectionId, database, table }: Props) {
           onClick={applyWhere}
           disabled={where.trim() === appliedWhere}
         >
-          Apply
+          {t('common.apply')}
         </Button>
-        <Button size="sm" variant="ghost" onClick={refresh} title="Refresh">
+        <Button size="sm" variant="ghost" onClick={refresh} title={t('common.refresh')}>
           <RefreshCw className="w-4 h-4" />
         </Button>
         <Button size="sm" variant="outline" onClick={() => setExportOpen(true)}>
-          <Download className="w-4 h-4" /> Export
+          <Download className="w-4 h-4" /> {t('common.export')}
         </Button>
         <div className="w-px h-6 bg-border mx-1" />
         <Button size="sm" variant="outline" onClick={() => setEditing({ mode: 'insert' })}>
-          <Plus className="w-4 h-4" /> Insert
+          <Plus className="w-4 h-4" /> {t('common.insert')}
         </Button>
         <Button
           size="sm"
@@ -159,23 +161,23 @@ export function TableDataView({ connectionId, database, table }: Props) {
           onClick={onDeleteSelected}
           disabled={selected.size === 0}
         >
-          <Trash2 className="w-4 h-4" /> Delete ({selected.size})
+          <Trash2 className="w-4 h-4" /> {t('tableData.deleteCount', { count: selected.size })}
         </Button>
       </div>
 
       {data && !data.hasPrimaryKey && (
         <div className="flex items-center gap-2 px-3 py-1.5 bg-amber-500/10 border-b border-amber-500/30 text-amber-300 text-xs">
           <AlertTriangle className="w-3.5 h-3.5" />
-          This table has no primary key — edit and delete are disabled to avoid mass updates.
+          {t('tableData.noPrimaryKeyHint')}
         </div>
       )}
 
       {/* 表格 */}
       <div className="flex-1 overflow-auto">
-        {loading && <div className="p-3 text-xs text-muted-foreground">Loading...</div>}
+        {loading && <div className="p-3 text-xs text-muted-foreground">{t('common.loading')}</div>}
         {!loading && data && data.rows.length === 0 && (
           <div className="p-3 text-xs text-muted-foreground">
-            No rows matched the current query.
+            {t('tableData.noRowsMatched')}
           </div>
         )}
         {data && (
@@ -223,7 +225,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
                       onClick={() => setEditing({ mode: 'edit', row })}
                       className="text-muted-foreground hover:text-foreground"
                       disabled={!data.hasPrimaryKey}
-                      title={data.hasPrimaryKey ? 'Edit row' : 'No primary key'}
+                      title={data.hasPrimaryKey ? t('tableData.editRow') : t('tableData.noPk')}
                     >
                       <Pencil className="w-3 h-3" />
                     </button>
@@ -244,14 +246,18 @@ export function TableDataView({ connectionId, database, table }: Props) {
       {data && (
         <div className="flex items-center justify-between px-3 py-1.5 border-t border-border text-xs">
           <span className="text-muted-foreground">
-            {data.total.toLocaleString()} rows · page {page} / {totalPages}
+            {t('tableData.rowsPagination', {
+              total: data.total.toLocaleString(),
+              page,
+              totalPages
+            })}
           </span>
           <div className="flex items-center gap-1">
             <Button size="sm" variant="outline" disabled={page <= 1} onClick={() => setPage(page - 1)}>
-              Prev
+              {t('common.prev')}
             </Button>
             <Button size="sm" variant="outline" disabled={page >= totalPages} onClick={() => setPage(page + 1)}>
-              Next
+              {t('common.next')}
             </Button>
           </div>
         </div>
@@ -268,12 +274,12 @@ export function TableDataView({ connectionId, database, table }: Props) {
             try {
               if (editing.mode === 'insert') {
                 await unwrap(api.db.insertRow({ connectionId, database, table, values }))
-                showToast('Row inserted', 'success')
+                showToast(t('tableData.rowInserted'), 'success')
               } else {
                 await unwrap(
                   api.db.updateRow({ connectionId, database, table, pkValues: pkOld!, changes: values })
                 )
-                showToast('Row updated', 'success')
+                showToast(t('tableData.rowUpdated'), 'success')
               }
               setEditing(null)
               refresh()

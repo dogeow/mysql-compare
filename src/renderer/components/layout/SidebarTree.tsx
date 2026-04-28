@@ -14,6 +14,7 @@ import {
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
 import type {
   DatabaseRowRefEntry,
@@ -69,6 +70,7 @@ export function SidebarTree({
   onSelectTable,
   onOpenTableMenu
 }: SidebarTreeProps) {
+  const { t } = useI18n()
   return (
     <>
       <div className="space-y-2 border-b border-border p-2">
@@ -78,11 +80,11 @@ export function SidebarTree({
             <Input
               value={keyword}
               onChange={(event) => onKeywordChange(event.target.value)}
-              placeholder="Search connection"
+              placeholder={t('sidebar.searchConnection')}
               className="h-8 pl-7"
             />
           </div>
-          <Button size="icon" variant="outline" onClick={onCreateConnection} title="New connection">
+          <Button size="icon" variant="outline" onClick={onCreateConnection} title={t('sidebar.newConnection')}>
             <Plus className="h-4 w-4" />
           </Button>
         </div>
@@ -97,7 +99,7 @@ export function SidebarTree({
         )}
 
         {filteredConnections.length === 0 && (
-          <div className="px-3 py-4 text-xs text-muted-foreground">No connection.</div>
+          <div className="px-3 py-4 text-xs text-muted-foreground">{t('sidebar.noConnection')}</div>
         )}
 
         {filteredConnections.map((connection) => {
@@ -123,14 +125,14 @@ export function SidebarTree({
                   <button
                     onClick={() => onEditConnection(connection)}
                     className="p-1 text-muted-foreground hover:text-foreground"
-                    title="Edit"
+                    title={t('common.edit')}
                   >
                     <Pencil className="h-3 w-3" />
                   </button>
                   <button
                     onClick={() => onDeleteConnection(connection)}
                     className="p-1 text-muted-foreground hover:text-destructive"
-                    title="Delete"
+                    title={t('common.delete')}
                   >
                     <Trash2 className="h-3 w-3" />
                   </button>
@@ -139,7 +141,7 @@ export function SidebarTree({
 
               {node?.expanded && (
                 <div className="pl-4">
-                  {node.loading && <div className="px-2 py-1 text-xs text-muted-foreground">Loading...</div>}
+                  {node.loading && <div className="px-2 py-1 text-xs text-muted-foreground">{t('common.loading')}</div>}
                   {node.databases?.map((database) => {
                     const dbExpanded = node.expandedDbs.has(database)
                     const filterValue = getTableFilter(connection.id, database)
@@ -178,7 +180,7 @@ export function SidebarTree({
                                   onOpenSQLConsole(connection, database)
                                 }}
                                 className="p-1 text-muted-foreground hover:text-foreground"
-                                title={`Open SQL console for ${database}`}
+                                title={t('sidebar.openSqlConsole', { database })}
                               >
                                 <FileCode2 className="h-3 w-3" />
                               </button>
@@ -188,7 +190,7 @@ export function SidebarTree({
                                   onRefreshDatabase(connection, database)
                                 }}
                                 className="p-1 text-muted-foreground hover:text-foreground"
-                                title="Refresh"
+                                title={t('common.refresh')}
                               >
                                 <RefreshCw className="h-3 w-3" />
                               </button>
@@ -203,7 +205,7 @@ export function SidebarTree({
                               onChange={(event) =>
                                 onTableFilterChange(connection.id, database, event.target.value)
                               }
-                              placeholder="Filter tables"
+                              placeholder={t('sidebar.filterTables')}
                               className="my-1 h-6 text-xs"
                             />
                             {(node.tables[database] || [])
@@ -221,7 +223,7 @@ export function SidebarTree({
                                   onContextMenu={(event) =>
                                     onOpenTableMenu(event, connection, database, table)
                                   }
-                                  title="Right click for table actions"
+                                  title={t('sidebar.rightClickHint')}
                                 >
                                   <TableIcon className="mr-1 h-3 w-3 text-muted-foreground" />
                                   <span className="flex-1 truncate text-xs">{table}</span>

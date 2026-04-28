@@ -1,6 +1,7 @@
 import type { ReactNode } from 'react'
 import { DiffPanelResultContainer } from './DiffPanelResultContainer'
-import { DIFF_PANEL_IDLE_NOTICE } from './diff-panel-view-state'
+import { getDiffPanelIdleNotice } from './diff-panel-view-state'
+import { useI18n } from '@renderer/i18n'
 import type { DiffResultTab } from './diff-panel-utils'
 
 interface DiffPanelContentAreaProps {
@@ -24,10 +25,11 @@ export function DiffPanelContentArea({
   identicalNotice,
   skippedNotice
 }: DiffPanelContentAreaProps) {
+  const { t } = useI18n()
   return (
     <div className="min-h-0 flex-1 overflow-auto">
       <div className="flex min-h-full flex-col gap-3 p-4">
-        {showIdleNotice && <div className="text-xs text-muted-foreground">{DIFF_PANEL_IDLE_NOTICE}</div>}
+        {showIdleNotice && <div className="text-xs text-muted-foreground">{getDiffPanelIdleNotice(t)}</div>}
         {showResult && (
           <DiffPanelResultContainer
             resultTab={resultTab}

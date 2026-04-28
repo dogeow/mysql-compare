@@ -4,6 +4,7 @@ import { Dialog } from '@renderer/components/ui/dialog'
 import { Button } from '@renderer/components/ui/button'
 import { api, unwrap } from '@renderer/lib/api'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n } from '@renderer/i18n'
 import type { ConnectionConfig, DbEngine, SafeConnection } from '../../../shared/types'
 import { ConnectionDialogForm } from './ConnectionDialogForm'
 import {
@@ -22,6 +23,7 @@ interface Props {
 
 export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Props) {
   const { showToast } = useUIStore()
+  const { t } = useI18n()
   const sshKeyInputRef = useRef<HTMLInputElement>(null)
   const [testFeedback, setTestFeedback] = useState<{
     level: 'success' | 'error'
@@ -69,9 +71,9 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
     try {
       const content = await file.text()
       update('sshPrivateKey', content)
-      showToast(`Loaded SSH key: ${file.name}`, 'success')
+      showToast(t('connection.sshKeyLoaded', { name: file.name }), 'success')
     } catch {
-      showToast('Failed to read SSH key file', 'error')
+      showToast(t('connection.sshKeyReadFailed'), 'error')
     }
   }
 
@@ -121,7 +123,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
     setBusy(true)
     try {
       await unwrap(api.connection.upsert(buildPayload(form)))
-      showToast('Saved', 'success')
+      showToast(t('common.saved'), 'success')
       onSaved?.()
       onOpenChange(false)
     } catch (err) {
@@ -135,16 +137,16 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
     <Dialog
       open={open}
       onOpenChange={onOpenChange}
-      title={connection ? 'Edit Connection' : 'New Connection'}
-      description="Connect to MySQL or PostgreSQL, directly or through an SSH tunnel."
+      title={connection ? t('connection.editTitle') : t('connection.newTitle')}
+      description={t('connection.description')}
       className="max-w-2xl"
       footer={
         <>
           <Button variant="outline" onClick={onTest} disabled={busy}>
-            Test
+            {t('common.test')}
           </Button>
           <Button onClick={onSave} disabled={busy}>
-            Save
+            {t('common.save')}
           </Button>
         </>
       }

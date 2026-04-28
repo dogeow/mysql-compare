@@ -1,15 +1,10 @@
 import type { ReactNode } from 'react'
 import { Badge } from '@renderer/components/ui/badge'
 import type { DatabaseDiff } from '../../../shared/types'
+import type { Translator } from '@renderer/i18n'
 import type { ComparePhase } from './diff-panel-formatters'
 import type { DiffPanelToolbarSummary } from './DiffPanelToolbar'
 import type { DiffResultTab } from './diff-panel-utils'
-
-export const DIFF_PANEL_IDLE_NOTICE =
-  'Choose source & target then click Compare. Row comparison uses shared primary keys when possible and falls back to all shared columns when needed.'
-
-export const DIFF_PANEL_SKIPPED_ROW_NOTICE =
-  'Schema is identical, but some row comparisons were skipped. Open the Content diff tab for details.'
 
 interface BuildDiffPanelTabItemsArgs {
   sourceTableCount: number
@@ -29,27 +24,30 @@ interface BuildDiffPanelToolbarSummaryArgs {
   rowSkippedTableCount: number
 }
 
-export function buildDiffPanelTabItems({
-  sourceTableCount,
-  targetTableCount,
-  comparisonEntryCount,
-  compareErrorCount,
-  visibleSchemaDiffCount,
-  compareData,
-  rowChangedTableCount,
-  rowSkippedTableCount
-}: BuildDiffPanelTabItemsArgs): { value: DiffResultTab; label: ReactNode }[] {
+export function buildDiffPanelTabItems(
+  {
+    sourceTableCount,
+    targetTableCount,
+    comparisonEntryCount,
+    compareErrorCount,
+    visibleSchemaDiffCount,
+    compareData,
+    rowChangedTableCount,
+    rowSkippedTableCount
+  }: BuildDiffPanelTabItemsArgs,
+  t: Translator
+): { value: DiffResultTab; label: ReactNode }[] {
   return [
     {
       value: 'tables',
       label: (
         <span className="flex items-center gap-2">
-          <span>Tables</span>
+          <span>{t('diff.tabs.tables')}</span>
           <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            S {sourceTableCount}
+            {t('diff.tabs.sBadge', { count: sourceTableCount })}
           </Badge>
           <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            T {targetTableCount}
+            {t('diff.tabs.tBadge', { count: targetTableCount })}
           </Badge>
         </span>
       )
@@ -58,11 +56,13 @@ export function buildDiffPanelTabItems({
       value: 'status',
       label: (
         <span className="flex items-center gap-2">
-          <span>Status</span>
+          <span>{t('diff.tabs.status')}</span>
           <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
             {comparisonEntryCount}
           </Badge>
-          {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
+          {compareErrorCount > 0 && (
+            <Badge variant="destructive">{t('diff.tabs.errors', { count: compareErrorCount })}</Badge>
+          )}
         </span>
       )
     },
@@ -70,11 +70,13 @@ export function buildDiffPanelTabItems({
       value: 'schema',
       label: (
         <span className="flex items-center gap-2">
-          <span>Structure diff</span>
+          <span>{t('diff.tabs.structureDiff')}</span>
           <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-            {visibleSchemaDiffCount} changed
+            {t('diff.tabs.changed', { count: visibleSchemaDiffCount })}
           </Badge>
-          {compareErrorCount > 0 && <Badge variant="destructive">{compareErrorCount} errors</Badge>}
+          {compareErrorCount > 0 && (
+            <Badge variant="destructive">{t('diff.tabs.errors', { count: compareErrorCount })}</Badge>
+          )}
         </span>
       )
     },
@@ -84,15 +86,19 @@ export function buildDiffPanelTabItems({
             value: 'data' as const,
             label: (
               <span className="flex items-center gap-2">
-                <span>Content diff</span>
+                <span>{t('diff.tabs.contentDiff')}</span>
                 <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-                  {rowChangedTableCount} changed
+                  {t('diff.tabs.changed', { count: rowChangedTableCount })}
                 </Badge>
                 {rowSkippedTableCount > 0 && (
-                  <Badge variant="warning">{rowSkippedTableCount} skipped</Badge>
+                  <Badge variant="warning">
+                    {t('diff.tabs.skipped', { count: rowSkippedTableCount })}
+                  </Badge>
                 )}
                 {compareErrorCount > 0 && (
-                  <Badge variant="destructive">{compareErrorCount} errors</Badge>
+                  <Badge variant="destructive">
+                    {t('diff.tabs.errors', { count: compareErrorCount })}
+                  </Badge>
                 )}
               </span>
             )
@@ -120,6 +126,14 @@ export function buildDiffPanelToolbarSummary({
   }
 }
 
-export function getFullyIdenticalNotice(compareData: boolean): string {
-  return `Source and target are identical${compareData ? ' at schema and row level.' : ' at schema level.'}`
+export function getFullyIdenticalNotice(compareData: boolean, t: Translator): string {
+  return compareData ? t('diff.notice.identicalAll') : t('diff.notice.identicalSchema')
+}
+
+export function getDiffPanelIdleNotice(t: Translator): string {
+  return t('diff.notice.idle')
+}
+
+export function getDiffPanelSkippedRowNotice(t: Translator): string {
+  return t('diff.notice.skippedRow')
 }

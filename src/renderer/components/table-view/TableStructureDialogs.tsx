@@ -6,6 +6,7 @@ import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Dialog } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
+import { useI18n } from '@renderer/i18n'
 import type { ColumnInfo } from '../../../shared/types'
 import type { ColumnDraft, IndexDraft, PendingAction } from './table-structure-types'
 
@@ -42,6 +43,8 @@ export function TableStructureDialogs({
   onCopyPendingSQL,
   onExecutePendingAction
 }: TableStructureDialogsProps) {
+  const { t } = useI18n()
+
   return (
     <>
       {editingColumn && (
@@ -52,23 +55,23 @@ export function TableStructureDialogs({
               setEditingColumn(null)
             }
           }}
-          title="Edit Column"
+          title={t('columnDialog.editTitle')}
           description={`${database}.${table}.${editingColumn.originalName}`}
           className="max-w-2xl"
           footer={
             <>
               <Button variant="outline" onClick={() => setEditingColumn(null)} disabled={busy}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button onClick={onReviewColumnSQL} disabled={busy}>
-                Review SQL
+                {t('common.reviewSql')}
               </Button>
             </>
           }
         >
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="mb-1 block">Column Name</Label>
+              <Label className="mb-1 block">{t('columnDialog.columnName')}</Label>
               <Input
                 value={editingColumn.name}
                 onChange={(event) =>
@@ -79,7 +82,7 @@ export function TableStructureDialogs({
               />
             </div>
             <div>
-              <Label className="mb-1 block">Type</Label>
+              <Label className="mb-1 block">{t('common.type')}</Label>
               <Input
                 value={editingColumn.type}
                 onChange={(event) =>
@@ -99,7 +102,7 @@ export function TableStructureDialogs({
                     )
                   }
                 />
-                Nullable
+                {t('columnDialog.nullable')}
               </label>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -110,12 +113,12 @@ export function TableStructureDialogs({
                     )
                   }
                 />
-                Set Default
+                {t('columnDialog.setDefault')}
               </label>
-              {editingColumn.isAutoIncrement && <Badge variant="info">AUTO_INCREMENT preserved</Badge>}
+              {editingColumn.isAutoIncrement && <Badge variant="info">{t('columnDialog.autoIncPreserved')}</Badge>}
             </div>
             <div className="col-span-2">
-              <Label className="mb-1 block">Default Value</Label>
+              <Label className="mb-1 block">{t('columnDialog.defaultValue')}</Label>
               <Input
                 value={editingColumn.defaultValue}
                 onChange={(event) =>
@@ -124,11 +127,11 @@ export function TableStructureDialogs({
                   )
                 }
                 disabled={!editingColumn.useDefault}
-                placeholder="Leave empty with Set Default on to write DEFAULT NULL"
+                placeholder={t('columnDialog.defaultNullHint')}
               />
             </div>
             <div className="col-span-2">
-              <Label className="mb-1 block">Comment</Label>
+              <Label className="mb-1 block">{t('common.comment')}</Label>
               <Input
                 value={editingColumn.comment}
                 onChange={(event) =>
@@ -150,23 +153,23 @@ export function TableStructureDialogs({
               setEditingIndex(null)
             }
           }}
-          title={editingIndex.mode === 'add' ? 'Add Index' : 'Edit Index'}
+          title={editingIndex.mode === 'add' ? t('indexDialog.addTitle') : t('indexDialog.editTitle')}
           description={`${database}.${table}`}
           className="max-w-2xl"
           footer={
             <>
               <Button variant="outline" onClick={() => setEditingIndex(null)} disabled={busy}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button onClick={onReviewIndexSQL} disabled={busy}>
-                Review SQL
+                {t('common.reviewSql')}
               </Button>
             </>
           }
         >
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <Label className="mb-1 block">Index Name</Label>
+              <Label className="mb-1 block">{t('indexDialog.indexName')}</Label>
               <Input
                 value={editingIndex.name}
                 onChange={(event) =>
@@ -179,7 +182,7 @@ export function TableStructureDialogs({
               />
             </div>
             <div>
-              <Label className="mb-1 block">Index Type</Label>
+              <Label className="mb-1 block">{t('indexDialog.indexType')}</Label>
               <Input
                 value={editingIndex.type}
                 onChange={(event) =>
@@ -208,7 +211,7 @@ export function TableStructureDialogs({
                     })
                   }
                 />
-                Primary key
+                {t('indexDialog.primaryKey')}
               </label>
               <label className="flex items-center gap-2">
                 <Checkbox
@@ -222,11 +225,11 @@ export function TableStructureDialogs({
                   }
                   disabled={editingIndex.primary}
                 />
-                Unique
+                {t('indexDialog.unique')}
               </label>
             </div>
             <div className="col-span-2 space-y-2">
-              <Label className="block">Columns</Label>
+              <Label className="block">{t('common.columns')}</Label>
               <div className="grid max-h-48 grid-cols-2 gap-2 overflow-auto rounded border border-border p-3 text-sm">
                 {columns.map((column) => (
                   <label key={column.name} className="flex items-center gap-2">
@@ -263,13 +266,13 @@ export function TableStructureDialogs({
           footer={
             <>
               <Button variant="outline" onClick={onClosePendingAction} disabled={busy}>
-                Back
+                {t('common.back')}
               </Button>
               <Button variant="outline" onClick={onCopyPendingSQL} disabled={busy}>
-                <Copy className="h-3 w-3" /> Copy SQL
+                <Copy className="h-3 w-3" /> {t('common.copySql')}
               </Button>
               <Button onClick={onExecutePendingAction} disabled={busy}>
-                {busy ? 'Executing...' : 'Confirm & Execute'}
+                {busy ? t('tableInfo.executing') : t('common.confirmExecute')}
               </Button>
             </>
           }

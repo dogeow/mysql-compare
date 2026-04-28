@@ -6,6 +6,7 @@ import { Dialog } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { cn } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
 import type {
   CreateSQLDialogState,
@@ -63,6 +64,7 @@ export function SidebarOverlays({
   exportDialog,
   onExportDialogOpenChange
 }: SidebarOverlaysProps) {
+  const { t } = useI18n()
   return (
     <>
       {(creating || editing) && (
@@ -83,28 +85,28 @@ export function SidebarOverlays({
           >
             <TableMenuItem
               icon={<Pencil className="h-3.5 w-3.5" />}
-              label="Rename Table"
+              label={t('sidebar.overlays.renameTable')}
               onClick={() => onRenameTable(tableMenu)}
             />
             <TableMenuItem
               icon={<Copy className="h-3.5 w-3.5" />}
-              label={`Copy to ${tableMenu.table}_copy`}
+              label={t('sidebar.overlays.copyToCopy', { table: tableMenu.table })}
               onClick={() => onCopyTable(tableMenu)}
             />
             <TableMenuItem
               icon={<FileCode2 className="h-3.5 w-3.5" />}
-              label="Show CREATE TABLE"
+              label={t('sidebar.overlays.showCreateTable')}
               onClick={() => onShowCreateSQL(tableMenu)}
             />
             <TableMenuItem
               icon={<Download className="h-3.5 w-3.5" />}
-              label="Export..."
+              label={t('sidebar.overlays.exportEllipsis')}
               onClick={() => onExportTable(tableMenu)}
             />
             <div className="my-1 h-px bg-border" />
             <TableMenuItem
               icon={<Trash2 className="h-3.5 w-3.5" />}
-              label="Drop Table"
+              label={t('sidebar.overlays.dropTable')}
               onClick={() => onDropTable(tableMenu)}
               danger
             />
@@ -116,22 +118,25 @@ export function SidebarOverlays({
         <Dialog
           open
           onOpenChange={onRenameDialogOpenChange}
-          title="Rename Table"
-          description={`Rename ${renameDialog.database}.${renameDialog.table} to a new table name.`}
+          title={t('sidebar.overlays.renameTable')}
+          description={t('sidebar.overlays.renameDescription', {
+            db: renameDialog.database,
+            table: renameDialog.table
+          })}
           className="max-w-md"
           footer={
             <>
               <Button variant="outline" onClick={() => onRenameDialogOpenChange(false)} disabled={actionBusy}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button onClick={onSubmitRename} disabled={actionBusy || !renameDraft.trim()}>
-                Rename
+                {t('common.rename')}
               </Button>
             </>
           }
         >
           <div className="space-y-2">
-            <Label className="block">New Table Name</Label>
+            <Label className="block">{t('sidebar.overlays.newTableName')}</Label>
             <Input value={renameDraft} onChange={(event) => onRenameDraftChange(event.target.value)} />
           </div>
         </Dialog>
@@ -141,25 +146,25 @@ export function SidebarOverlays({
         <Dialog
           open
           onOpenChange={onCreateSQLDialogOpenChange}
-          title="CREATE TABLE"
+          title={t('sidebar.overlays.createTableTitle')}
           description={createSQLDialog.title}
           className="max-w-4xl"
           footer={
             <>
               <Button variant="outline" onClick={() => onCreateSQLDialogOpenChange(false)}>
-                Close
+                {t('common.close')}
               </Button>
               <Button
                 onClick={onCopyCreateSQL}
                 disabled={createSQLDialog.loading || !createSQLDialog.sql}
               >
-                Copy SQL
+                {t('common.copySql')}
               </Button>
             </>
           }
         >
           {createSQLDialog.loading ? (
-            <div className="text-sm text-muted-foreground">Loading...</div>
+            <div className="text-sm text-muted-foreground">{t('common.loading')}</div>
           ) : (
             <pre className="max-h-[60vh] overflow-auto whitespace-pre-wrap rounded border border-border bg-card p-3 text-xs">
               {createSQLDialog.sql}

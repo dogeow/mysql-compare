@@ -4,7 +4,8 @@ import { BrowserWindow, dialog } from 'electron'
 import { schemaService } from './schema-service'
 import { dbService } from './db-service'
 import type { DbDriver } from './drivers/types'
-import type { ColumnInfo, ExportTableRequest, ExportTableResult } from '../../shared/types'
+import { pgDialect, renderPgCreateTable } from './drivers/pg-dialect'
+import type { ColumnInfo, DbEngine, ExportSqlDialect, ExportTableRequest, ExportTableResult, TableSchema } from '../../shared/types'
 
 const EXPORT_BATCH_SIZE = 1000
 
@@ -14,8 +15,10 @@ export class ExportService {
 
     const driver = await dbService.getDriver(req.connectionId)
     const schema = await schemaService.getTableSchema(req.connectionId, req.database, req.table)
+    const sqlDialect = resolveSqlDialect(req.sqlDialect, driver.engine)
+    assertSqlDialectSupported(driver.engine, sqlDialect)
     this.validateQueryOptions(req, schema.columns)
-    const filePath = await this.pickFilePath(req)
+    const filePath = await this.pickFilePath(req, sqlDialect)
     if (!filePath) {
       return { canceled: true, rowsExported: 0 }
     }
@@ -28,15 +31,16 @@ export class ExportService {
       const includeData = req.includeData !== false
 
       if (includeCreateTable) {
-        await appendFile(filePath, `${ensureSemicolon(schema.createSQL)}\n\n`, 'utf8')
+        await appendFile(filePath, `${buildCreateTableSQL(schema, req.database, driver, sqlDialect)}\n\n`, 'utf8')
       }
       if (includeData) {
+        const targetDialect = sqlDialect === 'postgres' ? pgDialect : driver.dialect
         for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
           if (rows.length === 0) continue
           rowsExported += rows.length
           await appendFile(
             filePath,
-            `${driver.dialect.renderInsert(req.database, req.table, schema.columns, rows)}\n`,
+            `${targetDialect.renderInsert(req.database, req.table, schema.columns, rows)}\n`,
             'utf8'
           )
         }
@@ -67,6 +71,14 @@ export class ExportService {
     if (req.format === 'sql' && req.includeCreateTable === false && req.includeData === false) {
       throw new Error('Select structure or data for SQL export')
     }
+    if (
+      req.sqlDialect !== undefined &&
+      req.sqlDialect !== 'source' &&
+      req.sqlDialect !== 'mysql' &&
+      req.sqlDialect !== 'postgres'
+    ) {
+      throw new Error('Unsupported SQL export dialect')
+    }
     if (req.scope !== 'all' && req.scope !== 'filtered' && req.scope !== 'page') {
       throw new Error('Unsupported export scope')
     }
@@ -91,13 +103,14 @@ export class ExportService {
     }
   }
 
-  private async pickFilePath(req: ExportTableRequest): Promise<string | null> {
+  private async pickFilePath(req: ExportTableRequest, sqlDialect: DbEngine): Promise<string | null> {
     const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const extension = req.format === 'sql' ? 'sql' : req.format
-    const formatName = req.format === 'txt' ? 'Text' : req.format.toUpperCase()
+    const formatName = req.format === 'sql' ? `${sqlDialect.toUpperCase()} SQL` : req.format === 'txt' ? 'Text' : req.format.toUpperCase()
+    const dialectSuffix = req.format === 'sql' ? `.${sqlDialect}` : ''
     const options = {
       title: `Export ${req.database}.${req.table}`,
-      defaultPath: sanitizeFileName(`${req.database}.${req.table}.${req.scope}.${extension}`),
+      defaultPath: sanitizeFileName(`${req.database}.${req.table}.${req.scope}${dialectSuffix}.${extension}`),
       filters: [
         { name: formatName, extensions: [extension] },
         { name: 'All Files', extensions: ['*'] }
@@ -150,6 +163,34 @@ export class ExportService {
       yield batch
     }
   }
+}
+
+function resolveSqlDialect(sqlDialect: ExportSqlDialect | undefined, sourceEngine: DbEngine): DbEngine {
+  if (!sqlDialect || sqlDialect === 'source') return sourceEngine
+  return sqlDialect
+}
+
+function assertSqlDialectSupported(sourceEngine: DbEngine, sqlDialect: DbEngine): void {
+  if (sqlDialect === 'postgres' || sqlDialect === sourceEngine) return
+  throw new Error(`Exporting ${sourceEngine} tables as ${sqlDialect} SQL is not supported`)
+}
+
+function buildCreateTableSQL(
+  schema: TableSchema,
+  database: string,
+  sourceDriver: DbDriver,
+  sqlDialect: DbEngine
+): string {
+  if (sqlDialect === 'postgres') {
+    return ensureSemicolon(
+      renderPgCreateTable(schema, database, {
+        includeSchema: true,
+        sourceEngine: sourceDriver.engine
+      })
+    )
+  }
+
+  return ensureSemicolon(sourceDriver.dialect.stripDefiner(schema.createSQL))
 }
 
 function buildDelimitedRows(

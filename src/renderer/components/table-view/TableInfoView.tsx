@@ -6,6 +6,7 @@ import { Dialog } from '@renderer/components/ui/dialog'
 import { Input } from '@renderer/components/ui/input'
 import { Label } from '@renderer/components/ui/label'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n } from '@renderer/i18n'
 import type { TableSchema } from '../../../shared/types'
 
 interface Props {
@@ -16,6 +17,7 @@ interface Props {
 
 export function TableInfoView({ connectionId, database, table }: Props) {
   const { showToast } = useUIStore()
+  const { t } = useI18n()
   const [schema, setSchema] = useState<TableSchema | null>(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [confirmSQL, setConfirmSQL] = useState<string | null>(null)
@@ -48,7 +50,7 @@ export function TableInfoView({ connectionId, database, table }: Props) {
     setBusy(true)
     try {
       await unwrap(api.db.executeSQL(connectionId, confirmSQL, database))
-      showToast('Table comment updated', 'success')
+      showToast(t('tableInfo.commentUpdated'), 'success')
       setConfirmSQL(null)
       setEditing(false)
       await loadSchema()
@@ -62,38 +64,38 @@ export function TableInfoView({ connectionId, database, table }: Props) {
   const commentChanged = schema ? commentDraft !== (schema.tableComment ?? '') : false
 
   if (!schema) {
-    return <div className="p-3 text-xs text-muted-foreground">Loading...</div>
+    return <div className="p-3 text-xs text-muted-foreground">{t('common.loading')}</div>
   }
 
   return (
     <div className="h-full overflow-auto p-4">
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-        <InfoCard label="Rows" value={formatNumber(schema.rowEstimate)} />
-        <InfoCard label="Data Size" value={formatBytes(schema.dataLength)} />
-        <InfoCard label="Index Size" value={formatBytes(schema.indexLength)} />
-        <InfoCard label="Total Size" value={formatBytes((schema.dataLength ?? 0) + (schema.indexLength ?? 0))} />
-        <InfoCard label="Free Space" value={formatBytes(schema.dataFree)} />
-        <InfoCard label="Avg Row Length" value={formatBytes(schema.avgRowLength)} />
-        <InfoCard label="Engine" value={schema.engine || '-'} />
-        <InfoCard label="Collation" value={schema.charset || '-'} />
-        <InfoCard label="Auto Increment" value={schema.autoIncrement == null ? '-' : formatNumber(schema.autoIncrement)} />
-        <InfoCard label="Created" value={schema.createdAt || '-'} />
-        <InfoCard label="Updated" value={schema.updatedAt || '-'} />
-        <InfoCard label="Columns / Indexes" value={`${schema.columns.length} / ${schema.indexes.length}`} />
+        <InfoCard label={t('tableInfo.rows')} value={formatNumber(schema.rowEstimate)} />
+        <InfoCard label={t('tableInfo.dataSize')} value={formatBytes(schema.dataLength)} />
+        <InfoCard label={t('tableInfo.indexSize')} value={formatBytes(schema.indexLength)} />
+        <InfoCard label={t('tableInfo.totalSize')} value={formatBytes((schema.dataLength ?? 0) + (schema.indexLength ?? 0))} />
+        <InfoCard label={t('tableInfo.freeSpace')} value={formatBytes(schema.dataFree)} />
+        <InfoCard label={t('tableInfo.avgRowLength')} value={formatBytes(schema.avgRowLength)} />
+        <InfoCard label={t('tableInfo.engine')} value={schema.engine || '-'} />
+        <InfoCard label={t('tableInfo.collation')} value={schema.charset || '-'} />
+        <InfoCard label={t('tableInfo.autoIncrement')} value={schema.autoIncrement == null ? '-' : formatNumber(schema.autoIncrement)} />
+        <InfoCard label={t('tableInfo.created')} value={schema.createdAt || '-'} />
+        <InfoCard label={t('tableInfo.updated')} value={schema.updatedAt || '-'} />
+        <InfoCard label={t('tableInfo.columnsIndexes')} value={`${schema.columns.length} / ${schema.indexes.length}`} />
       </div>
 
       <section className="mt-4 rounded-lg border border-border bg-card p-4">
         <div className="mb-2 flex items-center justify-between gap-2">
           <div>
-            <h3 className="text-sm font-medium">Table Comment</h3>
-            <div className="text-xs text-muted-foreground">Visible in MySQL metadata and schema tools.</div>
+            <h3 className="text-sm font-medium">{t('tableInfo.tableComment')}</h3>
+            <div className="text-xs text-muted-foreground">{t('tableInfo.visibleHint')}</div>
           </div>
           <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
-            <Pencil className="h-3.5 w-3.5" /> Edit Comment
+            <Pencil className="h-3.5 w-3.5" /> {t('tableInfo.editComment')}
           </Button>
         </div>
         <div className="rounded border border-border/70 bg-background p-3 text-sm whitespace-pre-wrap break-words">
-          {schema.tableComment || <span className="text-muted-foreground">No comment</span>}
+          {schema.tableComment || <span className="text-muted-foreground">{t('tableInfo.noComment')}</span>}
         </div>
       </section>
 
@@ -103,22 +105,22 @@ export function TableInfoView({ connectionId, database, table }: Props) {
           onOpenChange={(open) => {
             if (!open && !busy) setEditing(false)
           }}
-          title="Edit Table Comment"
+          title={t('tableInfo.editTableComment')}
           description={`${database}.${table}`}
           className="max-w-2xl"
           footer={
             <>
               <Button variant="outline" onClick={() => setEditing(false)} disabled={busy}>
-                Cancel
+                {t('common.cancel')}
               </Button>
               <Button onClick={() => setConfirmSQL(pendingSQL)} disabled={busy || !commentChanged}>
-                Review SQL
+                {t('common.reviewSql')}
               </Button>
             </>
           }
         >
           <div>
-            <Label className="mb-1 block">Comment</Label>
+            <Label className="mb-1 block">{t('common.comment')}</Label>
             <Input value={commentDraft} onChange={(event) => setCommentDraft(event.target.value)} />
           </div>
         </Dialog>
@@ -130,26 +132,26 @@ export function TableInfoView({ connectionId, database, table }: Props) {
           onOpenChange={(open) => {
             if (!open && !busy) setConfirmSQL(null)
           }}
-          title="Confirm Table Comment Change"
-          description="Review the SQL before executing."
+          title={t('tableInfo.confirmTableCommentChange')}
+          description={t('tableInfo.reviewBeforeExecute')}
           className="max-w-3xl"
           footer={
             <>
               <Button variant="outline" onClick={() => setConfirmSQL(null)} disabled={busy}>
-                Back
+                {t('common.back')}
               </Button>
               <Button
                 variant="outline"
                 onClick={() => {
                   navigator.clipboard.writeText(confirmSQL)
-                  showToast('SQL copied', 'success')
+                  showToast(t('common.sqlCopied'), 'success')
                 }}
                 disabled={busy}
               >
-                <Copy className="h-3.5 w-3.5" /> Copy SQL
+                <Copy className="h-3.5 w-3.5" /> {t('common.copySql')}
               </Button>
               <Button onClick={saveComment} disabled={busy}>
-                {busy ? 'Executing...' : 'Confirm & Execute'}
+                {busy ? t('tableInfo.executing') : t('common.confirmExecute')}
               </Button>
             </>
           }

@@ -6,6 +6,7 @@ import { Label } from '@renderer/components/ui/label'
 import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Select } from '@renderer/components/ui/select'
+import { useI18n, type Translator } from '@renderer/i18n'
 import type { ColumnInfo } from '../../../shared/types'
 
 const NULL_ENUM_SELECT_VALUE = '__mysql_compare_null__'
@@ -21,6 +22,7 @@ interface Props {
 }
 
 export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmit }: Props) {
+  const { t } = useI18n()
   const [values, setValues] = useState<Record<string, unknown>>({})
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -50,16 +52,16 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
       const changes: Record<string, unknown> = {}
       if (mode === 'insert') {
         for (const column of columns) {
-          const normalized = normalizeColumnValue(column, values[column.name], mode)
+          const normalized = normalizeColumnValue(column, values[column.name], mode, t)
           if (column.isAutoIncrement && normalized == null) continue
-          validateColumnValue(column, normalized, mode)
+          validateColumnValue(column, normalized, mode, t)
           changes[column.name] = normalized
         }
         await onSubmit(changes)
       } else {
         for (const column of columns) {
-          const normalized = normalizeColumnValue(column, values[column.name], mode)
-          validateColumnValue(column, normalized, mode)
+          const normalized = normalizeColumnValue(column, values[column.name], mode, t)
+          validateColumnValue(column, normalized, mode, t)
           if (row && row[column.name] !== normalized) {
             changes[column.name] = normalized
           }
@@ -80,15 +82,15 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
     <Dialog
       open
       onOpenChange={(o) => !o && onClose()}
-      title={mode === 'insert' ? 'Insert Row' : 'Edit Row'}
+      title={mode === 'insert' ? t('rowEdit.insertTitle') : t('rowEdit.editTitle')}
       className="max-w-4xl"
       footer={
         <>
           <Button variant="outline" onClick={onClose} disabled={busy}>
-            Cancel
+            {t('common.cancel')}
           </Button>
           <Button onClick={handleSubmit} disabled={busy || (mode === 'edit' && !hasChanges)}>
-            {mode === 'insert' ? 'Insert' : 'Update'}
+            {mode === 'insert' ? t('common.insert') : t('common.update')}
           </Button>
         </>
       }
@@ -100,11 +102,11 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
               <div className="flex flex-wrap items-center gap-1.5">
                 <span>{column.name}</span>
                 <span className="text-[10px] opacity-60">{column.type}</span>
-                {column.isPrimaryKey && <span className="text-[10px] text-amber-400">PK</span>}
+                {column.isPrimaryKey && <span className="text-[10px] text-amber-400">{t('rowEdit.pk')}</span>}
                 {!column.nullable && <span className="text-[10px] text-red-400">*</span>}
                 {column.comment && (
                   <span className="rounded bg-amber-500/10 px-1.5 py-0.5 text-[10px] font-medium text-amber-300">
-                    Comment
+                    {t('common.comment')}
                   </span>
                 )}
               </div>
@@ -114,7 +116,7 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
                 </div>
               )}
             </Label>
-            {renderInput(column, values[column.name], (nextValue) => {
+            {renderInput(column, values[column.name], t, (nextValue) => {
               setError(null)
               setValues((state) => ({ ...state, [column.name]: nextValue }))
             })}
@@ -151,7 +153,8 @@ function createInitialValue(column: ColumnInfo): unknown {
 function normalizeColumnValue(
   column: ColumnInfo,
   value: unknown,
-  mode: 'insert' | 'edit'
+  mode: 'insert' | 'edit',
+  t: Translator
 ): unknown {
   if (column.type === 'tinyint(1)') {
     return value === 1 || value === true || value === '1' ? 1 : 0
@@ -170,7 +173,7 @@ function normalizeColumnValue(
     if (isNumericColumn(column)) {
       const numericValue = Number(trimmed)
       if (!Number.isFinite(numericValue)) {
-        throw new Error(`"${column.name}" must be a valid number`)
+        throw new Error(t('rowEdit.validNumber', { name: column.name }))
       }
       return numericValue
     }
@@ -179,7 +182,7 @@ function normalizeColumnValue(
       try {
         JSON.parse(trimmed)
       } catch {
-        throw new Error(`"${column.name}" must contain valid JSON`)
+        throw new Error(t('rowEdit.validJson', { name: column.name }))
       }
     }
 
@@ -192,11 +195,12 @@ function normalizeColumnValue(
 function validateColumnValue(
   column: ColumnInfo,
   value: unknown,
-  mode: 'insert' | 'edit'
+  mode: 'insert' | 'edit',
+  t: Translator
 ): void {
   if (column.isAutoIncrement && mode === 'insert' && value == null) return
   if (!column.nullable && (value === null || value === undefined || value === '')) {
-    throw new Error(`"${column.name}" is required`)
+    throw new Error(t('rowEdit.requiredField', { name: column.name }))
   }
 }
 
@@ -215,6 +219,7 @@ function isNumericColumn(column: ColumnInfo): boolean {
 function renderInput(
   c: ColumnInfo,
   value: unknown,
+  t: Translator,
   onChange: (v: unknown) => void
 ): React.ReactNode {
   const enumOptions = getEnumOptions(c)
@@ -231,7 +236,7 @@ function renderInput(
   if (enumOptions.length > 0) {
     const stringValue = value == null ? '' : String(value)
     const selectValue = getEnumSelectValue(stringValue, c.nullable, enumOptions, value)
-    const options = buildEnumSelectOptions(enumOptions, c.nullable, selectValue, stringValue)
+    const options = buildEnumSelectOptions(enumOptions, c.nullable, selectValue, stringValue, t)
 
     return (
       <Select
@@ -323,7 +328,8 @@ function buildEnumSelectOptions(
   enumOptions: string[],
   nullable: boolean,
   selectValue: string,
-  currentValue: string
+  currentValue: string,
+  t: Translator
 ): { value: string; label: string }[] {
   const options: { value: string; label: string }[] = []
 
@@ -332,7 +338,7 @@ function buildEnumSelectOptions(
   }
 
   if (selectValue === EMPTY_ENUM_PLACEHOLDER_VALUE) {
-    options.push({ value: EMPTY_ENUM_PLACEHOLDER_VALUE, label: 'Select...' })
+    options.push({ value: EMPTY_ENUM_PLACEHOLDER_VALUE, label: t('rowEdit.select') })
   }
 
   if (currentValue !== '' && !enumOptions.includes(currentValue)) {
@@ -342,7 +348,7 @@ function buildEnumSelectOptions(
   options.push(
     ...enumOptions.map((option) => ({
       value: option,
-      label: option === '' ? '(empty string)' : option
+      label: option === '' ? t('rowEdit.emptyString') : option
     }))
   )
 

@@ -3,6 +3,7 @@ import { Badge } from '@renderer/components/ui/badge'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Table, TBody, Td, THead, Th, Tr } from '@renderer/components/ui/table'
 import { cn, formatCellValue } from '@renderer/lib/utils'
+import { useI18n } from '@renderer/i18n'
 import type { QueryRowsResult } from '../../../shared/types'
 import { buildRowKey } from './table-compare-utils'
 
@@ -43,6 +44,8 @@ export function TableComparePane({
   onToggleAllVisible,
   onToggleRow
 }: TableComparePaneProps) {
+  const { t } = useI18n()
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded border border-border bg-card/40">
       <div className="border-b border-border/60 px-3 py-2">
@@ -56,18 +59,18 @@ export function TableComparePane({
           </div>
           {data && (
             <div className="shrink-0 text-right text-[11px] text-muted-foreground">
-              <div>{data.total.toLocaleString()} rows</div>
-              <div>{data.hasPrimaryKey ? `PK: ${data.primaryKey.join(', ')}` : 'No primary key'}</div>
+              <div>{t('diff.pane.rows', { count: data.total.toLocaleString() })}</div>
+              <div>{data.hasPrimaryKey ? t('diff.pane.pkPrefix', { columns: data.primaryKey.join(', ') }) : t('diff.pane.noPrimaryKey')}</div>
             </div>
           )}
         </div>
       </div>
 
       <div ref={scrollContainerRef} onScroll={onScroll} className="min-h-0 flex-1 overflow-auto">
-        {loading && <div className="p-3 text-xs text-muted-foreground">Loading rows...</div>}
+        {loading && <div className="p-3 text-xs text-muted-foreground">{t('diff.pane.loadingRows')}</div>}
         {!loading && error && <div className="break-all p-3 text-xs text-red-300">{error}</div>}
         {!loading && !error && data && data.rows.length === 0 && (
-          <div className="p-3 text-xs text-muted-foreground">No rows found on this page.</div>
+          <div className="p-3 text-xs text-muted-foreground">{t('diff.pane.noRowsOnPage')}</div>
         )}
         {data && data.rows.length > 0 && (
           <Table>
@@ -86,10 +89,20 @@ export function TableComparePane({
                 )}
                 {data.columns.map((column) => (
                   <Th key={column.name}>
-                    <div className="flex items-center gap-1">
-                      {column.isPrimaryKey && <Badge variant="warning">PK</Badge>}
-                      <span>{column.name}</span>
-                      <span className="text-[10px] text-muted-foreground">{column.type}</span>
+                    <div className="flex flex-col items-start gap-1 whitespace-normal py-1 leading-tight">
+                      <div className="flex flex-wrap items-center gap-1">
+                        {column.isPrimaryKey && <Badge variant="warning">PK</Badge>}
+                        <span>{column.name}</span>
+                        <span className="text-[10px] text-muted-foreground">{column.type}</span>
+                      </div>
+                      {column.comment && (
+                        <span
+                          className="max-w-[14rem] truncate text-[10px] font-normal text-amber-300/90"
+                          title={column.comment}
+                        >
+                          {column.comment}
+                        </span>
+                      )}
                     </div>
                   </Th>
                 ))}

@@ -6,6 +6,7 @@ import { api, unwrap } from '@renderer/lib/api'
 import { cn } from '@renderer/lib/utils'
 import { formatCellValue } from '@renderer/lib/utils'
 import { useUIStore } from '@renderer/store/ui-store'
+import { useI18n, type Translator } from '@renderer/i18n'
 
 interface Props {
   connectionId: string
@@ -19,11 +20,10 @@ type SQLExecutionResult =
   | { kind: 'batch'; statements: number; affectedRows: number; details: string[] }
   | { kind: 'empty'; message: string }
 
-const DEFAULT_SQL = '-- Multiple statements supported. Use Cmd/Ctrl + Enter to run.\nSELECT *\nFROM `your_table_name`\nLIMIT 100;'
-
 export function SQLQueryView({ connectionId, connectionName, database }: Props) {
   const { showToast } = useUIStore()
-  const [sql, setSQL] = useState(DEFAULT_SQL)
+  const { t } = useI18n()
+  const [sql, setSQL] = useState(() => t('sql.placeholder'))
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<SQLExecutionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -38,16 +38,16 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
   const runSQL = async () => {
     const statement = sql.trim()
     if (!statement) {
-      showToast('SQL is empty', 'error')
+      showToast(t('sql.empty'), 'error')
       return
     }
     setRunning(true)
     setError(null)
     try {
       const raw = await unwrap(api.db.executeSQL(connectionId, statement, database))
-      const normalized = normalizeResult(raw)
+      const normalized = normalizeResult(raw, t)
       setResult(normalized)
-      showToast('SQL executed', 'success')
+      showToast(t('sql.executed'), 'success')
     } catch (err) {
       const message = (err as Error).message
       setError(message)
@@ -62,9 +62,9 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
     try {
       const text = await file.text()
       setSQL(text)
-      showToast(`Loaded ${file.name}`, 'success')
+      showToast(t('sql.loaded', { name: file.name }), 'success')
     } catch (err) {
-      showToast((err as Error).message || 'Failed to read SQL file', 'error')
+      showToast((err as Error).message || t('sql.readFailed'), 'error')
     }
   }
 
@@ -73,12 +73,12 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
       <div className="border-b border-border bg-card px-3 py-2">
         <div className="flex items-center justify-between gap-3">
           <div className="min-w-0">
-            <div className="text-sm font-medium">SQL Console</div>
+            <div className="text-sm font-medium">{t('sql.consoleTitle')}</div>
             <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
           </div>
           <div className="flex items-center gap-2">
-            <Button size="sm" variant="outline" onClick={() => setSQL(DEFAULT_SQL)} disabled={running}>
-              <RotateCcw className="h-4 w-4" /> Reset
+            <Button size="sm" variant="outline" onClick={() => setSQL(t('sql.placeholder'))} disabled={running}>
+              <RotateCcw className="h-4 w-4" /> {t('sql.reset')}
             </Button>
             <Button
               size="sm"
@@ -86,10 +86,10 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
               onClick={() => fileInputRef.current?.click()}
               disabled={running}
             >
-              <FolderOpen className="h-4 w-4" /> Open File
+              <FolderOpen className="h-4 w-4" /> {t('sql.openFile')}
             </Button>
             <Button size="sm" onClick={runSQL} disabled={running}>
-              <Play className="h-4 w-4" /> {running ? 'Running...' : 'Run'}
+              <Play className="h-4 w-4" /> {running ? t('sql.running') : t('sql.run')}
             </Button>
           </div>
         </div>
@@ -144,7 +144,7 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
           />
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
             <FileUp className="h-3.5 w-3.5" />
-            <span>Drag a SQL/text file here, or use Open File.</span>
+            <span>{t('sql.dropFileHint')}</span>
           </div>
         </div>
 
@@ -157,7 +157,7 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
             <ResultPanel result={result} />
           ) : (
             <div className="flex h-full items-center justify-center rounded-md border border-dashed border-border text-sm text-muted-foreground">
-              Run SQL against {subtitle} to see results here.
+              {t('sql.runHint', { subtitle })}
             </div>
           )}
         </div>
@@ -167,6 +167,8 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
 }
 
 function ResultPanel({ result }: { result: SQLExecutionResult }) {
+  const { t } = useI18n()
+
   if (result.kind === 'empty') {
     return (
       <div className="rounded-md border border-border bg-card p-3 text-sm text-muted-foreground">
@@ -178,9 +180,9 @@ function ResultPanel({ result }: { result: SQLExecutionResult }) {
   if (result.kind === 'mutation') {
     return (
       <div className="space-y-2 rounded-md border border-border bg-card p-3 text-sm">
-        <div>Affected rows: {result.affectedRows}</div>
-        {result.insertId !== undefined && <div>Insert ID: {String(result.insertId)}</div>}
-        {result.warningStatus !== undefined && <div>Warnings: {result.warningStatus}</div>}
+        <div>{t('sql.affectedRows', { count: result.affectedRows })}</div>
+        {result.insertId !== undefined && <div>{t('sql.insertId', { id: String(result.insertId) })}</div>}
+        {result.warningStatus !== undefined && <div>{t('sql.warnings', { count: result.warningStatus })}</div>}
       </div>
     )
   }
@@ -188,8 +190,8 @@ function ResultPanel({ result }: { result: SQLExecutionResult }) {
   if (result.kind === 'batch') {
     return (
       <div className="space-y-2 rounded-md border border-border bg-card p-3 text-sm">
-        <div>Executed {result.statements} statements</div>
-        <div>Total affected rows: {result.affectedRows}</div>
+        <div>{t('sql.executedStatements', { count: result.statements })}</div>
+        <div>{t('sql.totalAffected', { count: result.affectedRows })}</div>
         {result.details.length > 0 && (
           <ul className="list-disc space-y-1 pl-5 text-xs text-muted-foreground">
             {result.details.map((detail, index) => (
@@ -204,7 +206,7 @@ function ResultPanel({ result }: { result: SQLExecutionResult }) {
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-md border border-border bg-card">
       <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-        {result.rows.length.toLocaleString()} row(s)
+        {t('sql.rowCount', { count: result.rows.length.toLocaleString() })}
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         <Table>
@@ -232,10 +234,10 @@ function ResultPanel({ result }: { result: SQLExecutionResult }) {
   )
 }
 
-function normalizeResult(raw: unknown): SQLExecutionResult {
+function normalizeResult(raw: unknown, t: Translator): SQLExecutionResult {
   if (Array.isArray(raw)) {
     if (raw.length === 0) {
-      return { kind: 'empty', message: 'Statement executed successfully.' }
+      return { kind: 'empty', message: t('sql.statementSuccess') }
     }
 
     if (raw.every((item) => isMutationPayload(item))) {
@@ -248,8 +250,12 @@ function normalizeResult(raw: unknown): SQLExecutionResult {
           const affectedRows = Number(item.affectedRows ?? 0)
           const insertId = item.insertId
           return insertId !== undefined && insertId !== 0
-            ? `Statement ${index + 1}: ${affectedRows} row(s), insert id ${String(insertId)}`
-            : `Statement ${index + 1}: ${affectedRows} row(s)`
+            ? t('sql.statementDetailWithInsertId', {
+                index: index + 1,
+                count: affectedRows,
+                id: String(insertId)
+              })
+            : t('sql.statementDetail', { index: index + 1, count: affectedRows })
         })
       }
     }
@@ -277,7 +283,7 @@ function normalizeResult(raw: unknown): SQLExecutionResult {
     }
   }
 
-  return { kind: 'empty', message: 'Statement executed successfully.' }
+  return { kind: 'empty', message: t('sql.statementSuccess') }
 }
 
 function isMutationPayload(value: unknown): value is Record<string, unknown> {

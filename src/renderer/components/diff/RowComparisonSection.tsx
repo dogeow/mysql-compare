@@ -2,6 +2,7 @@
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
 import type { TableDataDiff, TableRowComparison } from '../../../shared/types'
+import { useI18n } from '@renderer/i18n'
 import { filterChangedRowComparisons } from './diff-panel-utils'
 import { formatDataSummary } from './diff-panel-formatters'
 import { TableOpenActions } from './diff-panel-presentation'
@@ -23,6 +24,7 @@ export function RowComparisonSection({
   onOpenSource,
   onOpenTarget
 }: RowComparisonSectionProps) {
+  const { t } = useI18n()
   const changedRowComparisons = filterChangedRowComparisons(rowComparisons)
   const visibleRowComparisons = showAll ? rowComparisons : changedRowComparisons
   const hiddenTableCount = rowComparisons.length - changedRowComparisons.length
@@ -30,8 +32,8 @@ export function RowComparisonSection({
   return (
     <div className="rounded-xl bg-card/15">
       <div className="flex items-center gap-2 px-3 py-2">
-        <strong className="text-sm">Row comparison</strong>
-        <Badge>{rowComparisons.length} table(s)</Badge>
+        <strong className="text-sm">{t('diff.rowCompare.title')}</strong>
+        <Badge>{t('diff.rowCompare.tableCount', { count: rowComparisons.length })}</Badge>
         {hiddenTableCount > 0 && (
           <Button
             size="sm"
@@ -39,14 +41,14 @@ export function RowComparisonSection({
             className="ml-auto h-7 px-2 text-[11px]"
             onClick={onToggleShowAll}
           >
-            {showAll ? 'Only different' : 'Show all'}
+            {showAll ? t('diff.rowCompare.onlyDifferent') : t('diff.rowCompare.showAll')}
           </Button>
         )}
       </div>
       <div className="divide-y divide-border/30 border-t border-border/30">
         {visibleRowComparisons.length === 0 ? (
           <div className="px-3 py-6 text-xs text-muted-foreground">
-            No row differences found. Click Show all to inspect identical or skipped comparisons.
+            {t('diff.rowCompare.noDiffsHint')}
           </div>
         ) : (
           visibleRowComparisons.map((rowComparison) => (
@@ -55,7 +57,7 @@ export function RowComparisonSection({
                 <strong className="text-sm">{rowComparison.table}</strong>
                 <RowCompareBadge dataDiff={rowComparison.dataDiff} />
                 <span className="mr-auto text-[10px] text-muted-foreground">
-                  {formatDataSummary(rowComparison.dataDiff)}
+                  {formatDataSummary(rowComparison.dataDiff, t)}
                 </span>
                 <TableOpenActions
                   compareAvailable
@@ -76,28 +78,35 @@ export function RowComparisonSection({
 }
 
 function RowCompareBadge({ dataDiff }: { dataDiff: TableDataDiff }) {
-  if (!dataDiff.comparable) return <Badge variant="warning">skipped</Badge>
+  const { t } = useI18n()
+  if (!dataDiff.comparable) return <Badge variant="warning">{t('diff.rowCompare.skipped')}</Badge>
   if (dataDiff.sourceOnly === 0 && dataDiff.targetOnly === 0 && dataDiff.modified === 0) {
-    return <Badge variant="success">identical</Badge>
+    return <Badge variant="success">{t('diff.rowCompare.identical')}</Badge>
   }
-  return <Badge variant="destructive">different</Badge>
+  return <Badge variant="destructive">{t('diff.rowCompare.different')}</Badge>
 }
 
 function DataDiffSection({ dataDiff }: { dataDiff: TableDataDiff }) {
+  const { t } = useI18n()
   return (
     <div className="mt-3 border-l border-border/40 pl-4 text-xs">
       <div className="space-y-1 rounded-md bg-background/40 px-3 py-2">
         {!dataDiff.comparable ? (
-          <div className="text-amber-400">{dataDiff.reason || 'Row comparison skipped'}</div>
+          <div className="text-amber-400">{dataDiff.reason || t('diff.rowCompare.rowComparisonSkipped')}</div>
         ) : (
           <div className="space-y-1">
             <div>
-              Compared by <code>{dataDiff.keyColumns.join(', ')}</code>
+              {t('diff.rowCompare.comparedBy', { columns: dataDiff.keyColumns.join(', ') })}
             </div>
             {dataDiff.reason && <div className="text-amber-400">{dataDiff.reason}</div>}
             <div className="text-muted-foreground">
-              source rows {dataDiff.sourceRowCount} · target rows {dataDiff.targetRowCount} ·
-              source only {dataDiff.sourceOnly} · target only {dataDiff.targetOnly} · modified {dataDiff.modified}
+              {t('diff.rowCompare.countSummary', {
+                sourceRows: dataDiff.sourceRowCount,
+                targetRows: dataDiff.targetRowCount,
+                sourceOnly: dataDiff.sourceOnly,
+                targetOnly: dataDiff.targetOnly,
+                modified: dataDiff.modified
+              })}
             </div>
           </div>
         )}
