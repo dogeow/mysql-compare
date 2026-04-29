@@ -1,0 +1,30 @@
+import { IPC } from '../../shared/ipc-channels'
+import type {
+  SSHCreateDirectoryRequest,
+  SSHDeleteFileRequest,
+  SSHDownloadDirectoryRequest,
+  SSHDownloadFileRequest,
+  SSHListFilesRequest,
+  SSHMoveFileRequest,
+  SSHReadFileRequest,
+  SSHUploadDirectoryRequest,
+  SSHUploadEntriesRequest,
+  SSHUploadFileRequest,
+  SSHWriteFileRequest,
+} from '../../shared/types'
+import { sshFileService } from '../services/ssh-file-service'
+import { handle } from './_wrap'
+
+export function registerSSHIPC(): void {
+  handle(IPC.SSHListFiles, (payload: SSHListFilesRequest) => sshFileService.listFiles(payload))
+  handle(IPC.SSHUploadFile, (payload: SSHUploadFileRequest) => sshFileService.uploadFile(payload))
+  handle(IPC.SSHUploadDirectory, (payload: SSHUploadDirectoryRequest) => sshFileService.uploadDirectory(payload))
+  handle(IPC.SSHUploadEntries, (payload: SSHUploadEntriesRequest) => sshFileService.uploadEntries(payload))
+  handle(IPC.SSHDownloadFile, (payload: SSHDownloadFileRequest) => sshFileService.downloadFile(payload))
+  handle(IPC.SSHDownloadDirectory, (payload: SSHDownloadDirectoryRequest) => sshFileService.downloadDirectory(payload))
+  handle(IPC.SSHReadFile, (payload: SSHReadFileRequest) => sshFileService.readFile(payload))
+  handle(IPC.SSHWriteFile, (payload: SSHWriteFileRequest) => sshFileService.writeFile(payload))
+  handle(IPC.SSHCreateDirectory, (payload: SSHCreateDirectoryRequest) => sshFileService.createDirectory(payload))
+  handle(IPC.SSHDeleteFile, (payload: SSHDeleteFileRequest) => sshFileService.deleteFile(payload))
+  handle(IPC.SSHMoveFile, (payload: SSHMoveFileRequest) => sshFileService.moveFile(payload))
+}

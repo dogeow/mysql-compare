@@ -1,14 +1,18 @@
-import { appendFile, writeFile } from 'node:fs/promises'
+import { open, type FileHandle } from 'node:fs/promises'
+import { spawn } from 'node:child_process'
 import { dirname, extname, join } from 'node:path'
 import { BrowserWindow, dialog } from 'electron'
 import { schemaService } from './schema-service'
 import { dbService } from './db-service'
+import { sshService } from './ssh-service'
+import { connectionStore } from '../store/connection-store'
 import type { DbDriver } from './drivers/types'
 import { mysqlDialect } from './drivers/mysql-dialect'
 import { pgDialect, renderPgCreateTable } from './drivers/pg-dialect'
 import type {
   ColumnInfo,
   DbEngine,
+  ExportDatabaseBackend,
   ExportDatabaseRequest,
   ExportDatabaseResult,
   ExportSqlDialect,
@@ -18,6 +22,43 @@ import type {
 } from '../../shared/types'
 
 const EXPORT_BATCH_SIZE = 1000
+const EXPORT_WRITE_BUFFER_BYTES = 512 * 1024
+
+class BufferedExportWriter {
+  private readonly chunks: string[] = []
+  private bufferedBytes = 0
+
+  constructor(private readonly fileHandle: FileHandle) {}
+
+  async write(chunk: string): Promise<void> {
+    if (!chunk) return
+    this.chunks.push(chunk)
+    this.bufferedBytes += Buffer.byteLength(chunk, 'utf8')
+    if (this.bufferedBytes >= EXPORT_WRITE_BUFFER_BYTES) {
+      await this.flush()
+    }
+  }
+
+  async close(): Promise<void> {
+    try {
+      await this.flush()
+    } finally {
+      await this.fileHandle.close()
+    }
+  }
+
+  private async flush(): Promise<void> {
+    if (this.chunks.length === 0) return
+    const combined = this.chunks.join('')
+    this.chunks.length = 0
+    this.bufferedBytes = 0
+    await this.fileHandle.appendFile(combined, 'utf8')
+  }
+}
+
+async function openExportWriter(filePath: string): Promise<BufferedExportWriter> {
+  return new BufferedExportWriter(await open(filePath, 'w'))
+}
 
 export class ExportService {
   async exportDatabase(req: ExportDatabaseRequest): Promise<ExportDatabaseResult> {
@@ -32,38 +73,50 @@ export class ExportService {
       return { canceled: true, tablesExported: 0, rowsExported: 0 }
     }
 
-    await writeFile(filePath, '', 'utf8')
+    const backend = resolveDatabaseExportBackend(req.backend)
+    if (backend === 'mysqldump') {
+      assertMySQLDumpSupported(driver.engine, sqlDialect)
+      await this.exportDatabaseWithMySQLDump(req, filePath)
+      return {
+        canceled: false,
+        filePath,
+        tablesExported: tables.length,
+        rowsExported: 0,
+        backend,
+        rowsCountAccurate: req.includeData === false
+      }
+    }
+
+    const writer = await openExportWriter(filePath)
 
     const includeCreateTable = req.includeCreateTable !== false
     const includeData = req.includeData !== false
     const targetDialect = getTargetDialect(driver, sqlDialect)
     let rowsExported = 0
 
-    if (includeCreateTable) {
-      const prelude = buildDatabasePrelude(req.database, sqlDialect)
-      if (prelude) await appendFile(filePath, `${prelude}\n\n`, 'utf8')
-    }
-
-    for (const table of tables) {
-      const schema = await schemaService.getTableSchema(req.connectionId, req.database, table)
+    try {
       if (includeCreateTable) {
-        await appendFile(
-          filePath,
-          `${buildCreateTableSQL(schema, req.database, driver, sqlDialect, { includeDatabasePrelude: false })}\n\n`,
-          'utf8'
-        )
+        const prelude = buildDatabasePrelude(req.database, sqlDialect)
+        if (prelude) await writer.write(`${prelude}\n\n`)
       }
-      if (includeData) {
-        for await (const rows of this.iterateAllRows(driver, req.database, table, schema.columns, schema.primaryKey)) {
-          if (rows.length === 0) continue
-          rowsExported += rows.length
-          await appendFile(
-            filePath,
-            `${targetDialect.renderInsert(req.database, table, schema.columns, rows)}\n`,
-            'utf8'
+
+      for (const table of tables) {
+        const schema = await schemaService.getTableSchema(req.connectionId, req.database, table)
+        if (includeCreateTable) {
+          await writer.write(
+            `${buildCreateTableSQL(schema, req.database, driver, sqlDialect, { includeDatabasePrelude: false })}\n\n`
           )
         }
+        if (includeData) {
+          for await (const rows of this.iterateAllRows(driver, req.database, table, schema.columns, schema.primaryKey)) {
+            if (rows.length === 0) continue
+            rowsExported += rows.length
+            await writer.write(`${targetDialect.renderInsert(req.database, table, schema.columns, rows)}\n`)
+          }
+        }
       }
+    } finally {
+      await writer.close()
     }
 
     return { canceled: false, filePath, tablesExported: tables.length, rowsExported }
@@ -82,45 +135,43 @@ export class ExportService {
       return { canceled: true, rowsExported: 0 }
     }
 
-    await writeFile(filePath, '', 'utf8')
+    const writer = await openExportWriter(filePath)
 
     let rowsExported = 0
-    if (req.format === 'sql') {
-      const includeCreateTable = req.includeCreateTable !== false
-      const includeData = req.includeData !== false
+    try {
+      if (req.format === 'sql') {
+        const includeCreateTable = req.includeCreateTable !== false
+        const includeData = req.includeData !== false
 
-      if (includeCreateTable) {
-        await appendFile(filePath, `${buildCreateTableSQL(schema, req.database, driver, sqlDialect)}\n\n`, 'utf8')
-      }
-      if (includeData) {
-        const targetDialect = getTargetDialect(driver, sqlDialect)
+        if (includeCreateTable) {
+          await writer.write(`${buildCreateTableSQL(schema, req.database, driver, sqlDialect)}\n\n`)
+        }
+        if (includeData) {
+          const targetDialect = getTargetDialect(driver, sqlDialect)
+          for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
+            if (rows.length === 0) continue
+            rowsExported += rows.length
+            await writer.write(`${targetDialect.renderInsert(req.database, req.table, schema.columns, rows)}\n`)
+          }
+        }
+      } else {
+        const delimiter = req.format === 'csv' ? ',' : '\t'
+        const includeHeaders = req.includeHeaders !== false
+
+        if (includeHeaders) {
+          await writer.write(
+            `${schema.columns.map((column) => quoteDelimitedValue(column.name, delimiter)).join(delimiter)}\n`
+          )
+        }
+
         for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
           if (rows.length === 0) continue
           rowsExported += rows.length
-          await appendFile(
-            filePath,
-            `${targetDialect.renderInsert(req.database, req.table, schema.columns, rows)}\n`,
-            'utf8'
-          )
+          await writer.write(`${buildDelimitedRows(schema.columns, rows, delimiter)}\n`)
         }
       }
-    } else {
-      const delimiter = req.format === 'csv' ? ',' : '\t'
-      const includeHeaders = req.includeHeaders !== false
-
-      if (includeHeaders) {
-        await appendFile(
-          filePath,
-          `${schema.columns.map((column) => quoteDelimitedValue(column.name, delimiter)).join(delimiter)}\n`,
-          'utf8'
-        )
-      }
-
-      for await (const rows of this.iterateRows(driver, req, schema.columns, schema.primaryKey)) {
-        if (rows.length === 0) continue
-        rowsExported += rows.length
-        await appendFile(filePath, `${buildDelimitedRows(schema.columns, rows, delimiter)}\n`, 'utf8')
-      }
+    } finally {
+      await writer.close()
     }
 
     return { canceled: false, filePath, rowsExported }
@@ -141,6 +192,54 @@ export class ExportService {
     ) {
       throw new Error('Unsupported SQL export dialect')
     }
+    if (req.backend !== undefined && req.backend !== 'builtin' && req.backend !== 'mysqldump') {
+      throw new Error('Unsupported database export backend')
+    }
+  }
+
+  private async exportDatabaseWithMySQLDump(req: ExportDatabaseRequest, filePath: string): Promise<void> {
+    const conn = connectionStore.getFull(req.connectionId)
+    if (!conn) throw new Error(`Connection ${req.connectionId} not found`)
+    if (conn.engine !== 'mysql') throw new Error('mysqldump export only supports MySQL connections')
+
+    const localPort = conn.useSSH ? await sshService.ensureTunnel(conn) : undefined
+    const host = conn.useSSH ? '127.0.0.1' : conn.host
+    const port = localPort ?? conn.port
+    const args = buildMySQLDumpArgs(req, filePath, {
+      host,
+      port,
+      username: conn.username,
+      database: req.database
+    })
+    const env = conn.password ? { ...process.env, MYSQL_PWD: conn.password } : process.env
+
+    await new Promise<void>((resolve, reject) => {
+      const child = spawn('mysqldump', args, {
+        env,
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe']
+      })
+
+      let stderr = ''
+      child.stderr.on('data', (chunk) => {
+        stderr += chunk.toString()
+      })
+      child.once('error', (error) => {
+        const spawnError = error as NodeJS.ErrnoException
+        if (spawnError.code === 'ENOENT') {
+          reject(new Error('mysqldump is not installed or not in PATH. Install the MySQL client or switch the export backend to Built-in exporter.'))
+          return
+        }
+        reject(error)
+      })
+      child.once('close', (code) => {
+        if (code === 0) {
+          resolve()
+          return
+        }
+        reject(new Error(stderr.trim() || `mysqldump exited with code ${code ?? -1}`))
+      })
+    })
   }
 
   private validate(req: ExportTableRequest): void {
@@ -293,9 +392,53 @@ function resolveSqlDialect(sqlDialect: ExportSqlDialect | undefined, sourceEngin
   return sqlDialect
 }
 
+function resolveDatabaseExportBackend(backend: ExportDatabaseBackend | undefined): ExportDatabaseBackend {
+  return backend ?? 'builtin'
+}
+
 function assertSqlDialectSupported(sourceEngine: DbEngine, sqlDialect: DbEngine): void {
   if ((sourceEngine === 'mysql' || sourceEngine === 'postgres') && (sqlDialect === 'mysql' || sqlDialect === 'postgres')) return
   throw new Error(`Exporting ${sourceEngine} tables as ${sqlDialect} SQL is not supported`)
+}
+
+function assertMySQLDumpSupported(sourceEngine: DbEngine, sqlDialect: DbEngine): void {
+  if (sourceEngine === 'mysql' && sqlDialect === 'mysql') return
+  throw new Error('mysqldump export only supports MySQL to MySQL-compatible SQL')
+}
+
+function buildMySQLDumpArgs(
+  req: ExportDatabaseRequest,
+  filePath: string,
+  options: { host: string; port: number; username: string; database: string }
+): string[] {
+  const includeCreateTable = req.includeCreateTable !== false
+  const includeData = req.includeData !== false
+  const args = [
+    `--host=${options.host}`,
+    `--port=${options.port}`,
+    `--user=${options.username}`,
+    '--protocol=tcp',
+    '--single-transaction',
+    '--quick',
+    '--skip-lock-tables',
+    '--skip-comments',
+    '--skip-dump-date',
+    '--skip-triggers',
+    '--hex-blob',
+    '--complete-insert',
+    `--result-file=${filePath}`
+  ]
+
+  if (!includeCreateTable) args.push('--no-create-info')
+  if (!includeData) args.push('--no-data')
+
+  if (includeCreateTable) {
+    args.push('--databases', options.database)
+  } else {
+    args.push(options.database)
+  }
+
+  return args
 }
 
 function getTargetDialect(sourceDriver: DbDriver, sqlDialect: DbEngine) {

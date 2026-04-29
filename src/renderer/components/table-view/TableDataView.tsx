@@ -13,6 +13,7 @@ import { useI18n } from '@renderer/i18n'
 import { ExportTableDialog } from './ExportTableDialog'
 import type { ColumnInfo, ExportScope, QueryRowsResult } from '../../../shared/types'
 import { RowEditDialog } from './RowEditDialog'
+import { toggleRowSelection } from './table-selection-utils'
 
 interface Props {
   connectionId: string
@@ -38,6 +39,8 @@ export function TableDataView({ connectionId, database, table }: Props) {
   const [exportOpen, setExportOpen] = useState(false)
   const [reloadToken, setReloadToken] = useState(0)
   const requestIdRef = useRef(0)
+  const selectionAnchorRef = useRef<number | null>(null)
+  const selectionShiftPressedRef = useRef(false)
 
   const refresh = () => setReloadToken((current) => current + 1)
 
@@ -47,6 +50,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
     setWhere('')
     setAppliedWhere('')
     setSelected(new Set())
+    selectionAnchorRef.current = null
     setEditing(null)
     setData(null)
   }, [connectionId, database, table])
@@ -71,6 +75,7 @@ export function TableDataView({ connectionId, database, table }: Props) {
         if (requestId !== requestIdRef.current) return
         setData(result)
         setSelected(new Set())
+        selectionAnchorRef.current = null
       } catch (err) {
         if (requestId !== requestIdRef.current) return
         setData(null)
@@ -107,12 +112,23 @@ export function TableDataView({ connectionId, database, table }: Props) {
     setAppliedWhere(where.trim())
   }
 
-  const onToggleSelect = (idx: number) => {
+  const onToggleSelect = (idx: number, shiftKey: boolean) => {
     setSelected((prev) => {
-      const n = new Set(prev)
-      n.has(idx) ? n.delete(idx) : n.add(idx)
-      return n
+      const nextSelection = toggleRowSelection({
+        selected: prev,
+        rowIndex: idx,
+        anchorIndex: selectionAnchorRef.current,
+        shiftKey
+      })
+
+      selectionAnchorRef.current = nextSelection.anchorIndex
+      return nextSelection.selected
     })
+  }
+
+  const onRowClick = (idx: number, shiftKey: boolean) => {
+    if (!data?.hasPrimaryKey) return
+    onToggleSelect(idx, shiftKey)
   }
 
   const onDeleteSelected = async () => {
@@ -229,17 +245,32 @@ export function TableDataView({ connectionId, database, table }: Props) {
             </THead>
             <TBody>
               {data.rows.map((row, i) => (
-                <Tr key={i}>
+                <Tr
+                  key={i}
+                  className={data.hasPrimaryKey ? 'cursor-pointer' : undefined}
+                  onClick={(event) => onRowClick(i, event.shiftKey)}
+                >
                   <Td>
                     <Checkbox
                       checked={selected.has(i)}
-                      onChange={() => onToggleSelect(i)}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        selectionShiftPressedRef.current = event.shiftKey
+                      }}
+                      onChange={() => {
+                        const shiftKey = selectionShiftPressedRef.current
+                        selectionShiftPressedRef.current = false
+                        onToggleSelect(i, shiftKey)
+                      }}
                       disabled={!data.hasPrimaryKey}
                     />
                   </Td>
                   <Td>
                     <button
-                      onClick={() => setEditing({ mode: 'edit', row })}
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        setEditing({ mode: 'edit', row })
+                      }}
                       className="text-muted-foreground hover:text-foreground"
                       disabled={!data.hasPrimaryKey}
                       title={data.hasPrimaryKey ? t('tableData.editRow') : t('tableData.noPk')}

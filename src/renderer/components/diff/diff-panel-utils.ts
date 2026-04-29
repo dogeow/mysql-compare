@@ -147,12 +147,7 @@ export function getRowDiffNavigation(
   totalDiffTables: number
 } {
   const orderedComparedTables = Array.from(new Set(comparedTables))
-  const fallbackDiffTables = Array.from(new Set(diffTables))
-  const diffSet = new Set(fallbackDiffTables)
-  const orderedDiffTables =
-    orderedComparedTables.length > 0
-      ? orderedComparedTables.filter((table) => diffSet.has(table))
-      : fallbackDiffTables
+  const orderedDiffTables = getOrderedDiffTables(orderedComparedTables, diffTables)
 
   if (orderedDiffTables.length === 0) {
     return {
@@ -204,6 +199,42 @@ export function getRowDiffNavigation(
     currentDiffPosition: null,
     totalDiffTables: orderedDiffTables.length
   }
+}
+
+export function getUpcomingRowDiffTables(
+  comparedTables: string[],
+  diffTables: string[],
+  currentTable: string,
+  limit: number
+): string[] {
+  if (limit <= 0) return []
+
+  const orderedComparedTables = Array.from(new Set(comparedTables))
+  const orderedDiffTables = getOrderedDiffTables(orderedComparedTables, diffTables)
+  if (orderedDiffTables.length === 0) return []
+
+  const currentDiffIndex = orderedDiffTables.indexOf(currentTable)
+  if (currentDiffIndex >= 0) {
+    return orderedDiffTables.slice(currentDiffIndex + 1, currentDiffIndex + 1 + limit)
+  }
+
+  const currentComparedIndex = orderedComparedTables.indexOf(currentTable)
+  if (currentComparedIndex < 0) {
+    return orderedDiffTables.slice(0, limit)
+  }
+
+  return orderedDiffTables
+    .filter((table) => orderedComparedTables.indexOf(table) > currentComparedIndex)
+    .slice(0, limit)
+}
+
+function getOrderedDiffTables(comparedTables: string[], diffTables: string[]): string[] {
+  const fallbackDiffTables = Array.from(new Set(diffTables))
+  const diffSet = new Set(fallbackDiffTables)
+
+  return comparedTables.length > 0
+    ? comparedTables.filter((table) => diffSet.has(table))
+    : fallbackDiffTables
 }
 
 export function filterComparisonEntries(

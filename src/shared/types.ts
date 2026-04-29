@@ -153,6 +153,8 @@ export type ExportScope = 'all' | 'filtered' | 'page' | 'selected'
 
 export type ExportSqlDialect = 'source' | DbEngine
 
+export type ExportDatabaseBackend = 'builtin' | 'mysqldump'
+
 export type ImportFormat = ExportFormat
 
 export interface ExportTableRequest {
@@ -183,6 +185,7 @@ export interface ExportDatabaseRequest {
   database: string
   format: 'sql'
   sqlDialect?: ExportSqlDialect
+  backend?: ExportDatabaseBackend
   includeCreateTable?: boolean
   includeData?: boolean
 }
@@ -192,6 +195,8 @@ export interface ExportDatabaseResult {
   filePath?: string
   tablesExported: number
   rowsExported: number
+  backend?: ExportDatabaseBackend
+  rowsCountAccurate?: boolean
 }
 
 export interface ImportTableRequest {
@@ -210,6 +215,101 @@ export interface ImportTableResult {
   filePath?: string
   rowsImported: number
   statementsExecuted: number
+}
+
+// ---------- SSH 文件管理 ----------
+export type SSHFileEntryType = 'file' | 'directory' | 'symlink' | 'other'
+
+export interface SSHFileEntry {
+  name: string
+  path: string
+  type: SSHFileEntryType
+  size: number
+  modifiedAt: number | null
+  permissions: string
+}
+
+export interface SSHListFilesRequest {
+  connectionId: string
+  path?: string
+}
+
+export interface SSHListFilesResult {
+  path: string
+  parentPath: string | null
+  entries: SSHFileEntry[]
+}
+
+export interface SSHUploadFileRequest {
+  connectionId: string
+  remoteDir: string
+}
+
+export interface SSHUploadDirectoryRequest {
+  connectionId: string
+  remoteDir: string
+}
+
+export type SSHUploadEntryType = 'file' | 'directory'
+
+export type SSHUploadEntry =
+  | { type: 'file'; localPath: string; relativePath: string }
+  | { type: 'directory'; relativePath: string }
+
+export interface SSHUploadEntriesRequest {
+  connectionId: string
+  remoteDir: string
+  entries: SSHUploadEntry[]
+}
+
+export interface SSHDownloadFileRequest {
+  connectionId: string
+  remotePath: string
+}
+
+export interface SSHDownloadDirectoryRequest {
+  connectionId: string
+  remotePath: string
+}
+
+export interface SSHReadFileRequest {
+  connectionId: string
+  remotePath: string
+}
+
+export interface SSHReadFileResult {
+  path: string
+  content: string
+}
+
+export interface SSHWriteFileRequest {
+  connectionId: string
+  remotePath: string
+  content: string
+}
+
+export interface SSHCreateDirectoryRequest {
+  connectionId: string
+  remoteDir: string
+  name: string
+}
+
+export interface SSHDeleteFileRequest {
+  connectionId: string
+  remotePath: string
+  type: SSHFileEntryType
+}
+
+export interface SSHMoveFileRequest {
+  connectionId: string
+  remotePath: string
+  nextPath: string
+}
+
+export interface SSHFileOperationResult {
+  canceled: boolean
+  localPath?: string
+  remotePath?: string
 }
 
 // ---------- Diff ----------

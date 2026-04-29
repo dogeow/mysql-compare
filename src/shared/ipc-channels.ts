@@ -25,6 +25,19 @@ export const IPC = {
   // 表结构
   GetTableSchema: 'schema:getTable',
 
+  // SSH 文件管理
+  SSHListFiles: 'ssh:listFiles',
+  SSHUploadFile: 'ssh:uploadFile',
+  SSHUploadDirectory: 'ssh:uploadDirectory',
+  SSHUploadEntries: 'ssh:uploadEntries',
+  SSHDownloadFile: 'ssh:downloadFile',
+  SSHDownloadDirectory: 'ssh:downloadDirectory',
+  SSHReadFile: 'ssh:readFile',
+  SSHWriteFile: 'ssh:writeFile',
+  SSHCreateDirectory: 'ssh:createDirectory',
+  SSHDeleteFile: 'ssh:deleteFile',
+  SSHMoveFile: 'ssh:moveFile',
+
   // Diff & Sync
   DiffDatabases: 'diff:databases',
   DiffTable: 'diff:table',

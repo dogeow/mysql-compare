@@ -2,17 +2,43 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExportDatabaseRequest, ExportTableRequest, TableSchema } from '../../shared/types'
 import type { DbDriver } from './drivers/types'
 
-const { appendFile, writeFile, showSaveDialog, getDriver, getTableSchema } = vi.hoisted(() => ({
-  appendFile: vi.fn(async () => undefined),
-  writeFile: vi.fn(async () => undefined),
-  showSaveDialog: vi.fn(),
-  getDriver: vi.fn(),
-  getTableSchema: vi.fn()
-}))
+const { fileHandle, open, showSaveDialog, getDriver, getTableSchema, getFull, ensureTunnel, spawn } = vi.hoisted(() => {
+  const fileHandle = {
+    appendFile: vi.fn(async () => undefined),
+    close: vi.fn(async () => undefined)
+  }
+
+  const spawn = vi.fn(() => {
+    const child = {
+      stderr: {
+        on: vi.fn()
+      },
+      once: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+        if (event === 'close') cb(0)
+        return child
+      })
+    }
+    return child
+  })
+
+  return {
+    fileHandle,
+    open: vi.fn(async () => fileHandle),
+    showSaveDialog: vi.fn(),
+    getDriver: vi.fn(),
+    getTableSchema: vi.fn(),
+    getFull: vi.fn(),
+    ensureTunnel: vi.fn(async () => 33061),
+    spawn
+  }
+})
 
 vi.mock('node:fs/promises', () => ({
-  appendFile,
-  writeFile
+  open
+}))
+
+vi.mock('node:child_process', () => ({
+  spawn
 }))
 
 vi.mock('electron', () => ({
@@ -37,17 +63,33 @@ vi.mock('./schema-service', () => ({
   }
 }))
 
+vi.mock('../store/connection-store', () => ({
+  connectionStore: {
+    getFull
+  }
+}))
+
+vi.mock('./ssh-service', () => ({
+  sshService: {
+    ensureTunnel
+  }
+}))
+
 import { exportService } from './export-service'
 import { mysqlDialect } from './drivers/mysql-dialect'
 import { pgDialect } from './drivers/pg-dialect'
 
 describe('ExportService', () => {
   beforeEach(() => {
-    appendFile.mockClear()
-    writeFile.mockClear()
+    open.mockClear()
+    fileHandle.appendFile.mockClear()
+    fileHandle.close.mockClear()
+    spawn.mockClear()
     showSaveDialog.mockReset()
     getDriver.mockReset()
     getTableSchema.mockReset()
+    getFull.mockReset()
+    ensureTunnel.mockReset()
     showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/users.sql' })
   })
 
@@ -174,6 +216,8 @@ describe('ExportService', () => {
 
     const output = getAppendedOutput()
     expect(result).toEqual({ canceled: false, filePath: '/tmp/shop.sql', tablesExported: 1, rowsExported: 1 })
+    expect(open).toHaveBeenCalledWith('/tmp/shop.sql', 'w')
+    expect(fileHandle.close).toHaveBeenCalledTimes(1)
     expect(output.match(/CREATE SCHEMA IF NOT EXISTS "shop";/g)?.length).toBe(1)
     expect(output).toContain('CREATE TABLE "shop"."users"')
     expect(output).toContain('INSERT INTO "shop"."users"')
@@ -184,6 +228,69 @@ describe('ExportService', () => {
       primaryKey: ['id'],
       batchSize: 1000
     })
+  })
+
+  it('exports a MySQL database with mysqldump when requested', async () => {
+    const { driver } = createMySQLDriver({ tables: ['users'], streamBatches: [] })
+
+    getDriver.mockResolvedValue(driver)
+    getFull.mockReturnValue({
+      id: 'mysql-conn',
+      engine: 'mysql',
+      name: 'Primary',
+      host: 'db.internal',
+      port: 3306,
+      username: 'root',
+      password: 'secret',
+      useSSH: true,
+      sshHost: 'ssh.internal',
+      sshPort: 22,
+      sshUsername: 'deployer',
+      createdAt: 1,
+      updatedAt: 1
+    })
+    ensureTunnel.mockResolvedValue(33061)
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/shop.sql' })
+
+    const result = await exportService.exportDatabase(
+      createDatabaseExportRequest({ backend: 'mysqldump', sqlDialect: 'mysql' })
+    )
+
+    expect(result).toEqual({
+      canceled: false,
+      filePath: '/tmp/shop.sql',
+      tablesExported: 1,
+      rowsExported: 0,
+      backend: 'mysqldump',
+      rowsCountAccurate: false
+    })
+    expect(ensureTunnel).toHaveBeenCalledTimes(1)
+    expect(spawn).toHaveBeenCalledWith(
+      'mysqldump',
+      expect.arrayContaining([
+        '--host=127.0.0.1',
+        '--port=33061',
+        '--user=root',
+        '--protocol=tcp',
+        '--single-transaction',
+        '--quick',
+        '--skip-lock-tables',
+        '--skip-comments',
+        '--skip-dump-date',
+        '--skip-triggers',
+        '--hex-blob',
+        '--complete-insert',
+        '--databases',
+        'shop',
+        '--result-file=/tmp/shop.sql'
+      ]),
+      expect.objectContaining({
+        windowsHide: true,
+        stdio: ['ignore', 'ignore', 'pipe'],
+        env: expect.objectContaining({ MYSQL_PWD: 'secret' })
+      })
+    )
+    expect(open).not.toHaveBeenCalled()
   })
 })
 
@@ -241,7 +348,7 @@ function createPostgresDriver(options: { streamBatches: Record<string, unknown>[
 }
 
 function getAppendedOutput(): string {
-  return appendFile.mock.calls.map((call) => String((call as unknown[])[1])).join('')
+  return fileHandle.appendFile.mock.calls.map((call) => String((call as unknown[])[0])).join('')
 }
 
 function buildSchema(): TableSchema {

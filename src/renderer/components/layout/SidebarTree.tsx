@@ -5,6 +5,7 @@ import {
   Database,
   Download,
   FileCode2,
+  Folder,
   Pencil,
   Plus,
   RefreshCw,
@@ -38,6 +39,7 @@ interface SidebarTreeProps {
   onToggleConnection: (connection: SafeConnection) => void | Promise<void>
   onEditConnection: (connection: SafeConnection) => void
   onDeleteConnection: (connection: SafeConnection) => void | Promise<void>
+  onOpenSSHFiles: (connection: SafeConnection) => void
   onToggleDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
   onOpenSQLConsole: (connection: SafeConnection, database: string) => void
   onExportDatabase: (connection: SafeConnection, database: string) => void
@@ -71,6 +73,7 @@ export function SidebarTree({
   onToggleConnection,
   onEditConnection,
   onDeleteConnection,
+  onOpenSSHFiles,
   onToggleDatabase,
   onOpenSQLConsole,
   onExportDatabase,
@@ -132,6 +135,18 @@ export function SidebarTree({
                   {connection.useSSH && <span className="ml-1 text-[9px] text-amber-400">SSH</span>}
                 </button>
                 <div className="flex opacity-0 group-hover:opacity-100">
+                  {connection.useSSH && (
+                    <button
+                      onClick={(event) => {
+                        event.stopPropagation()
+                        onOpenSSHFiles(connection)
+                      }}
+                      className="p-1 text-muted-foreground hover:text-foreground"
+                      title={t('sidebar.openSshFiles')}
+                    >
+                      <Folder className="h-3 w-3" />
+                    </button>
+                  )}
                   <button
                     onClick={() => onEditConnection(connection)}
                     className="p-1 text-muted-foreground hover:text-foreground"

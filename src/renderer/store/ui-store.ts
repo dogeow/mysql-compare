@@ -1,7 +1,9 @@
 // 用于在右侧主区域切换显示什么：表数据 / 表结构 / diff
 import { create } from 'zustand'
+import type { ExportDatabaseRequest } from '../../shared/types'
 
 let toastTimer: ReturnType<typeof setTimeout> | null = null
+const tabCloseGuards = new Map<string, () => boolean>()
 
 export type RightView =
   | { kind: 'empty' }
@@ -18,6 +20,14 @@ export type RightView =
       diffTables: string[]
     }
   | { kind: 'sql'; connectionId: string; connectionName?: string; database: string }
+  | {
+      kind: 'database-export'
+      exportTaskId: string
+      connectionName?: string
+      request: ExportDatabaseRequest
+    }
+  | { kind: 'ssh-files'; connectionId: string; connectionName: string }
+  | { kind: 'ssh-editor'; connectionId: string; connectionName: string; path: string }
   | { kind: 'diff' }
 
 export type WorkspaceView = Exclude<RightView, { kind: 'empty' }>
@@ -36,11 +46,23 @@ interface UIState {
   setRightView: (v: RightView) => void
   setActiveTab: (tabId: string) => void
   closeTab: (tabId: string) => void
+  registerTabCloseGuard: (tabId: string, guard: () => boolean) => () => void
+  confirmSSHPathTabRetarget: (connectionId: string, oldPath: string) => boolean
   renameTableTabs: (connectionId: string, database: string, oldTable: string, newTable: string) => void
   closeTableTabs: (connectionId: string, database: string, table: string) => void
+  moveSSHPathTabs: (connectionId: string, oldPath: string, newPath: string) => void
   refreshTableData: (connectionId: string, database: string, table: string) => void
   toast: { message: string; level: 'info' | 'error' | 'success' } | null
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
+}
+
+function isSameOrDescendantRemotePath(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root}/`)
+}
+
+function replaceRemotePathPrefix(path: string, oldPath: string, newPath: string): string {
+  if (path === oldPath) return newPath
+  return `${newPath}${path.slice(oldPath.length)}`
 }
 
 type ActiveState = Pick<UIState, 'activeTabId' | 'rightView'>
@@ -62,6 +84,9 @@ function compareViewReferencesTable(
 function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
+  if (view.kind === 'database-export') return `database-export:${view.exportTaskId}`
+  if (view.kind === 'ssh-files') return `ssh-files:${view.connectionId}`
+  if (view.kind === 'ssh-editor') return `ssh-editor:${view.connectionId}:${view.path}`
   if (view.kind === 'table-compare') {
     return `table-compare:${view.compareSessionId}`
   }
@@ -79,6 +104,13 @@ function getTabTitle(view: WorkspaceView): string {
       ? `SQL · ${view.database} @ ${view.connectionName}`
       : `SQL · ${view.database}`
   }
+  if (view.kind === 'database-export') {
+    return view.connectionName
+      ? `Export · ${view.request.database} @ ${view.connectionName}`
+      : `Export · ${view.request.database}`
+  }
+  if (view.kind === 'ssh-files') return `SSH · ${view.connectionName}`
+  if (view.kind === 'ssh-editor') return view.path.split('/').filter(Boolean).pop() || view.path
   if (view.kind === 'table-compare') return `Compare · ${view.table}`
   return view.table
 }
@@ -137,6 +169,8 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   closeTab: (tabId) =>
     set((state) => {
+      const allowClose = tabCloseGuards.get(tabId)?.() ?? true
+      if (!allowClose) return state
       const index = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
       if (index < 0) return state
       const workspaceTabs = state.workspaceTabs.filter((tab) => tab.id !== tabId)
@@ -145,6 +179,30 @@ export const useUIStore = create<UIState>((set) => ({
       }
       return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, index - 1) }
     }),
+  registerTabCloseGuard: (tabId, guard) => {
+    tabCloseGuards.set(tabId, guard)
+    return () => {
+      if (tabCloseGuards.get(tabId) === guard) {
+        tabCloseGuards.delete(tabId)
+      }
+    }
+  },
+  confirmSSHPathTabRetarget: (connectionId, oldPath) => {
+    const { workspaceTabs } = useUIStore.getState()
+
+    for (const tab of workspaceTabs) {
+      if (
+        tab.view.kind === 'ssh-editor' &&
+        tab.view.connectionId === connectionId &&
+        isSameOrDescendantRemotePath(tab.view.path, oldPath)
+      ) {
+        const allow = tabCloseGuards.get(tab.id)?.() ?? true
+        if (!allow) return false
+      }
+    }
+
+    return true
+  },
   renameTableTabs: (connectionId, database, oldTable, newTable) =>
     set((state) => {
       const oldTabId = getTabId({ kind: 'table', connectionId, database, table: oldTable })
@@ -214,6 +272,60 @@ export const useUIStore = create<UIState>((set) => ({
         return { ...state, workspaceTabs }
       }
       return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, removedActiveIndex - 1) }
+    }),
+  moveSSHPathTabs: (connectionId, oldPath, newPath) =>
+    set((state) => {
+      let changed = false
+      let nextActiveView: WorkspaceView | null = null
+      const seen = new Set<string>()
+      const workspaceTabs: WorkspaceTab[] = []
+
+      for (const tab of state.workspaceTabs) {
+        const affected =
+          tab.view.kind === 'ssh-editor' &&
+          tab.view.connectionId === connectionId &&
+          isSameOrDescendantRemotePath(tab.view.path, oldPath)
+
+        let nextTab = tab
+        if (affected && tab.view.kind === 'ssh-editor') {
+          nextTab = createTab({
+            ...tab.view,
+            path: replaceRemotePathPrefix(tab.view.path, oldPath, newPath)
+          })
+        }
+
+        if (affected) {
+          changed = true
+          if (tab.id === state.activeTabId) {
+            nextActiveView = nextTab.view
+          }
+        }
+
+        if (seen.has(nextTab.id)) {
+          changed = true
+          continue
+        }
+
+        seen.add(nextTab.id)
+        workspaceTabs.push(nextTab)
+      }
+
+      if (!changed) return state
+      if (!nextActiveView) {
+        return { ...state, workspaceTabs }
+      }
+
+      const activeTab = workspaceTabs.find((tab) => tab.id === getTabId(nextActiveView))
+      if (activeTab) {
+        return {
+          ...state,
+          workspaceTabs,
+          activeTabId: activeTab.id,
+          rightView: activeTab.view
+        }
+      }
+
+      return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, workspaceTabs.length - 1) }
     }),
   refreshTableData: (connectionId, database, table) =>
     set((state) => {

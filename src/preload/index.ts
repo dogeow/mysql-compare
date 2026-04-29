@@ -1,5 +1,5 @@
 // Preload：唯一允许调用 ipcRenderer 的地方。通过 contextBridge 把强类型 API 暴露给 renderer。
-import { contextBridge, ipcRenderer, IpcRendererEvent } from 'electron'
+import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
 import type {
   ConnectionConfig,
@@ -20,6 +20,20 @@ import type {
   QueryRowsResult,
   RenameTableRequest,
   SafeConnection,
+  SSHCreateDirectoryRequest,
+  SSHDeleteFileRequest,
+  SSHDownloadDirectoryRequest,
+  SSHDownloadFileRequest,
+  SSHFileOperationResult,
+  SSHListFilesRequest,
+  SSHListFilesResult,
+  SSHMoveFileRequest,
+  SSHReadFileRequest,
+  SSHReadFileResult,
+  SSHUploadDirectoryRequest,
+  SSHUploadEntriesRequest,
+  SSHUploadFileRequest,
+  SSHWriteFileRequest,
   SyncPlan,
   SyncProgressEvent,
   SyncRequest,
@@ -62,6 +76,22 @@ const api = {
   schema: {
     getTable: (connectionId: string, database: string, table: string) =>
       invoke<TableSchema>(IPC.GetTableSchema, { connectionId, database, table })
+  },
+  ssh: {
+    listFiles: (req: SSHListFilesRequest) => invoke<SSHListFilesResult>(IPC.SSHListFiles, req),
+    uploadFile: (req: SSHUploadFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHUploadFile, req),
+    uploadDirectory: (req: SSHUploadDirectoryRequest) => invoke<SSHFileOperationResult>(IPC.SSHUploadDirectory, req),
+    uploadEntries: (req: SSHUploadEntriesRequest) => invoke<SSHFileOperationResult>(IPC.SSHUploadEntries, req),
+    downloadFile: (req: SSHDownloadFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHDownloadFile, req),
+    downloadDirectory: (req: SSHDownloadDirectoryRequest) => invoke<SSHFileOperationResult>(IPC.SSHDownloadDirectory, req),
+    readFile: (req: SSHReadFileRequest) => invoke<SSHReadFileResult>(IPC.SSHReadFile, req),
+    writeFile: (req: SSHWriteFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHWriteFile, req),
+    createDirectory: (req: SSHCreateDirectoryRequest) => invoke<SSHFileOperationResult>(IPC.SSHCreateDirectory, req),
+    deleteFile: (req: SSHDeleteFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHDeleteFile, req),
+    moveFile: (req: SSHMoveFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHMoveFile, req)
+  },
+  system: {
+    getPathForFile: (file: File) => webUtils.getPathForFile(file)
   },
   diff: {
     databases: (req: DiffRequest) => invoke<DatabaseDiff>(IPC.DiffDatabases, req),

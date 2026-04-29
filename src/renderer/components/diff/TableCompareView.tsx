@@ -7,7 +7,13 @@ import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n } from '@renderer/i18n'
 import type { QueryRowsResult } from '../../../shared/types'
-import { getRowDiffNavigation } from './diff-panel-utils'
+import { getRowDiffNavigation, getUpcomingRowDiffTables } from './diff-panel-utils'
+import {
+  fetchComparedTableData,
+  getCachedComparedTableData,
+  prefetchComparedTables,
+  type ComparedTableRowsQuery
+} from './table-compare-data-cache'
 import { buildCopyValues, buildRowKey } from './table-compare-utils'
 import { TableComparePane } from './TableComparePane'
 
@@ -29,6 +35,9 @@ interface ComparedTableDataState {
 }
 
 const PAGE_SIZE = 100
+const PREFETCH_TABLE_COUNT = 3
+
+let tableCompareCacheScopeCounter = 0
 
 export function TableCompareView({
   compareSessionId,
@@ -52,6 +61,14 @@ export function TableCompareView({
   const targetScrollRef = useRef<HTMLDivElement | null>(null)
   const syncScrollFrameRef = useRef<number | null>(null)
   const syncingScrollRef = useRef(false)
+  const cacheScopeKeyRef = useRef<string | null>(null)
+
+  if (cacheScopeKeyRef.current === null) {
+    tableCompareCacheScopeCounter += 1
+    cacheScopeKeyRef.current = `table-compare:${tableCompareCacheScopeCounter}`
+  }
+
+  const cacheScopeKey = cacheScopeKeyRef.current
 
   const [sourceState, setSourceState] = useState<ComparedTableDataState>({
     data: null,
@@ -101,8 +118,13 @@ export function TableCompareView({
       }
     }
   }, [])
+  const upcomingDiffTables = useMemo(
+    () => getUpcomingRowDiffTables(comparedTables, diffTables, table, PREFETCH_TABLE_COUNT),
+    [comparedTables, diffTables, table]
+  )
 
   useComparedTableData({
+    cacheScopeKey,
     connectionId: sourceConnectionId,
     database: sourceDatabase,
     table,
@@ -112,7 +134,43 @@ export function TableCompareView({
     orderBy: stableOrderBy,
     onStateChange: setSourceState
   })
+
+  useEffect(() => {
+    if (upcomingDiffTables.length === 0) return
+    if (sourceState.loading || targetState.loading) return
+    if (!sourceState.data || !targetState.data) return
+    if (sourceState.error || targetState.error) return
+
+    void prefetchComparedTables({
+      cacheScopeKey,
+      sourceConnectionId,
+      sourceDatabase,
+      sourceReloadToken,
+      targetConnectionId,
+      targetDatabase,
+      targetReloadToken,
+      tables: upcomingDiffTables,
+      page: 1,
+      pageSize: PAGE_SIZE
+    }).catch(() => undefined)
+  }, [
+    cacheScopeKey,
+    sourceConnectionId,
+    sourceDatabase,
+    sourceReloadToken,
+    targetConnectionId,
+    targetDatabase,
+    targetReloadToken,
+    sourceState.data,
+    sourceState.error,
+    sourceState.loading,
+    targetState.data,
+    targetState.error,
+    targetState.loading,
+    upcomingDiffTables
+  ])
   useComparedTableData({
+    cacheScopeKey,
     connectionId: targetConnectionId,
     database: targetDatabase,
     table,
@@ -436,6 +494,7 @@ export function TableCompareView({
 }
 
 function useComparedTableData({
+  cacheScopeKey,
   connectionId,
   database,
   table,
@@ -445,6 +504,7 @@ function useComparedTableData({
   orderBy,
   onStateChange
 }: {
+  cacheScopeKey: string
   connectionId: string
   database: string
   table: string
@@ -460,6 +520,27 @@ function useComparedTableData({
     const requestId = requestIdRef.current + 1
     requestIdRef.current = requestId
 
+    const query: ComparedTableRowsQuery = {
+      cacheScopeKey,
+      connectionId,
+      database,
+      table,
+      page,
+      pageSize,
+      reloadToken,
+      orderBy
+    }
+
+    const cached = getCachedComparedTableData(query)
+    if (cached) {
+      onStateChange({
+        data: cached,
+        error: null,
+        loading: false
+      })
+      return
+    }
+
     onStateChange((current) => ({
       ...current,
       loading: true,
@@ -468,16 +549,7 @@ function useComparedTableData({
 
     void (async () => {
       try {
-        const data = await unwrap<QueryRowsResult>(
-          api.db.queryRows({
-            connectionId,
-            database,
-            table,
-            page,
-            pageSize,
-            orderBy
-          })
-        )
+        const data = await fetchComparedTableData(query)
 
         if (requestIdRef.current !== requestId) return
 
@@ -496,5 +568,5 @@ function useComparedTableData({
         })
       }
     })()
-  }, [connectionId, database, onStateChange, orderBy, page, pageSize, reloadToken, table])
+  }, [cacheScopeKey, connectionId, database, onStateChange, orderBy, page, pageSize, reloadToken, table])
 }

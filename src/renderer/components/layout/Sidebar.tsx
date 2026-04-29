@@ -273,6 +273,10 @@ export function Sidebar() {
     setRightView({ kind: 'sql', connectionId: conn.id, connectionName: conn.name, database: db })
   }
 
+  const openSSHFiles = (conn: SafeConnection) => {
+    setRightView({ kind: 'ssh-files', connectionId: conn.id, connectionName: conn.name })
+  }
+
   const openTableMenu = (
     event: React.MouseEvent<HTMLDivElement>,
     conn: SafeConnection,
@@ -515,6 +519,7 @@ export function Sidebar() {
           onToggleConnection={toggleConnection}
           onEditConnection={setEditing}
           onDeleteConnection={onDelete}
+          onOpenSSHFiles={openSSHFiles}
           onToggleDatabase={toggleDatabase}
           onOpenSQLConsole={openSQLConsole}
           onExportDatabase={openExportDatabaseDialog}

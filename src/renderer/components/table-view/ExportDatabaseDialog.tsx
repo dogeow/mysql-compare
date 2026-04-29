@@ -4,13 +4,13 @@ import { Button } from '@renderer/components/ui/button'
 import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Label } from '@renderer/components/ui/label'
 import { Select } from '@renderer/components/ui/select'
-import { api, unwrap } from '@renderer/lib/api'
+import { api } from '@renderer/lib/api'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n } from '@renderer/i18n'
 import type {
+  ExportDatabaseBackend,
   ExportDatabaseRequest,
-  ExportDatabaseResult,
   ExportSqlDialect
 } from '../../../shared/types'
 
@@ -22,15 +22,17 @@ interface Props {
 }
 
 export function ExportDatabaseDialog({ open, onOpenChange, connectionId, database }: Props) {
-  const { showToast } = useUIStore()
+  const { setRightView, showToast } = useUIStore()
   const { t } = useI18n()
-  const sourceEngine = useConnectionStore(
-    (state) => state.connections.find((connection) => connection.id === connectionId)?.engine ?? 'mysql'
+  const connection = useConnectionStore((state) =>
+    state.connections.find((item) => item.id === connectionId)
   )
+  const sourceEngine = connection?.engine ?? 'mysql'
+  const connectionName = connection?.name
   const [sqlDialect, setSqlDialect] = useState<ExportSqlDialect>(sourceEngine)
+  const [backend, setBackend] = useState<ExportDatabaseBackend>('builtin')
   const [includeCreateTable, setIncludeCreateTable] = useState(true)
   const [includeData, setIncludeData] = useState(true)
-  const [busy, setBusy] = useState(false)
 
   const sqlDialectOptions = useMemo(
     () => [
@@ -40,12 +42,29 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
     [t]
   )
 
+  const backendOptions = useMemo(
+    () => [
+      { value: 'builtin', label: t('databaseExportDialog.backendBuiltin') } as const,
+      { value: 'mysqldump', label: t('databaseExportDialog.backendMysqldump') } as const
+    ],
+    [t]
+  )
+
+  const canUseMySQLDump = sourceEngine === 'mysql' && sqlDialect === 'mysql'
+
   useEffect(() => {
     if (!open) return
     setSqlDialect(sourceEngine === 'postgres' ? 'postgres' : 'mysql')
+    setBackend('builtin')
     setIncludeCreateTable(true)
     setIncludeData(true)
   }, [connectionId, database, open, sourceEngine])
+
+  useEffect(() => {
+    if (!canUseMySQLDump && backend === 'mysqldump') {
+      setBackend('builtin')
+    }
+  }, [backend, canUseMySQLDump])
 
   const canExport = includeCreateTable || includeData
 
@@ -65,28 +84,21 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
       database,
       format: 'sql',
       sqlDialect,
+      backend,
       includeCreateTable,
       includeData
     }
 
-    setBusy(true)
-    try {
-      const result = await unwrap<ExportDatabaseResult>(api.db.exportDatabase(request))
-      if (!result.canceled) {
-        showToast(
-          t('databaseExportDialog.exported', {
-            tables: result.tablesExported,
-            rows: result.rowsExported
-          }),
-          'success'
-        )
-        onOpenChange(false)
-      }
-    } catch (error) {
-      showToast((error as Error).message, 'error')
-    } finally {
-      setBusy(false)
-    }
+    const exportTaskId =
+      globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+    onOpenChange(false)
+    setRightView({
+      kind: 'database-export',
+      exportTaskId,
+      connectionName,
+      request
+    })
   }
 
   return (
@@ -98,11 +110,11 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
       className="max-w-lg"
       footer={
         <>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>
             {t('common.cancel')}
           </Button>
-          <Button onClick={submit} disabled={busy || !canExport}>
-            {busy ? t('databaseExportDialog.exporting') : t('common.export')}
+          <Button onClick={submit} disabled={!canExport}>
+            {t('common.export')}
           </Button>
         </>
       }
@@ -116,6 +128,18 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
             options={sqlDialectOptions}
           />
         </div>
+
+        {sourceEngine === 'mysql' && canUseMySQLDump && (
+          <div>
+            <Label className="mb-1 block">{t('databaseExportDialog.backend')}</Label>
+            <Select
+              value={backend}
+              onChange={(event) => setBackend(event.target.value as ExportDatabaseBackend)}
+              options={backendOptions}
+            />
+            <p className="mt-1 text-xs text-muted-foreground">{t('databaseExportDialog.backendHint')}</p>
+          </div>
+        )}
 
         <div className="space-y-2 text-sm">
           <label className="flex items-center gap-2">

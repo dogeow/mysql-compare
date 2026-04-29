@@ -7,6 +7,7 @@ import {
   DEFAULT_TABLE_SEARCH_QUERY,
   filterChangedRowComparisons,
   filterComparisonEntries,
+  getUpcomingRowDiffTables,
   getPreferredComparisonTable,
   getRowDiffNavigation,
   parseDiffPanelPreferences,
@@ -245,6 +246,35 @@ describe('diff-panel-utils', () => {
       currentDiffPosition: null,
       totalDiffTables: 2
     })
+  })
+
+  it('returns the next changed tables for comparison prefetching', () => {
+    expect(
+      getUpcomingRowDiffTables(
+        ['activity_log', 'cache', 'chat_moderation_actions', 'users', 'workflows'],
+        ['cache', 'users', 'workflows'],
+        'chat_moderation_actions',
+        2
+      )
+    ).toEqual(['users', 'workflows'])
+
+    expect(
+      getUpcomingRowDiffTables(
+        ['activity_log', 'cache', 'chat_moderation_actions', 'users', 'workflows'],
+        ['cache', 'users', 'workflows'],
+        'users',
+        3
+      )
+    ).toEqual(['workflows'])
+
+    expect(
+      getUpcomingRowDiffTables(
+        ['activity_log', 'cache', 'chat_moderation_actions', 'users', 'workflows'],
+        ['cache', 'users', 'workflows'],
+        'workflows',
+        3
+      )
+    ).toEqual([])
   })
 
   it('restores the tables result tab from persisted preferences', () => {
