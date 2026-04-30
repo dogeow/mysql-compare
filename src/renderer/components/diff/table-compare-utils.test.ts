@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import type { ColumnInfo } from '../../../shared/types'
-import { buildCopyValues, buildRowKey } from './table-compare-utils'
+import {
+  buildCopyValues,
+  buildOverwriteTargetSyncRequest,
+  buildRowKey
+} from './table-compare-utils'
 
 function createColumn(name: string): ColumnInfo {
   return {
@@ -51,5 +55,27 @@ describe('table-compare-utils', () => {
     expect(buildCopyValues({ id: 7, email: 'ada@example.com' }, [createColumn('name')])).toEqual(
       {}
     )
+  })
+
+  it('builds a destructive full-table sync request for overwriting the target table', () => {
+    expect(
+      buildOverwriteTargetSyncRequest({
+        sourceConnectionId: 'source-1',
+        sourceDatabase: 'next',
+        targetConnectionId: 'target-1',
+        targetDatabase: 'next_copy',
+        table: 'words'
+      })
+    ).toEqual({
+      sourceConnectionId: 'source-1',
+      sourceDatabase: 'next',
+      targetConnectionId: 'target-1',
+      targetDatabase: 'next_copy',
+      tables: ['words'],
+      syncStructure: true,
+      syncData: true,
+      existingTableStrategy: 'overwrite-structure',
+      dryRun: false
+    })
   })
 })

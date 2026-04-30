@@ -374,7 +374,9 @@ export const zhCN: Dictionary = {
       noSharedPk: '两端缺少共同主键 — 行可能无法对齐。',
       selected: '已选 {{count}}',
       copying: '复制中...',
+      overwritingTargetTable: '覆盖中...',
       copySelectedToTarget: '复制所选行到目标端',
+      overwriteTargetTable: '覆盖目标表',
       prevDiff: '← 上一处差异',
       diffsChanged: '变更 {{count}}',
       diffPos: '差异 {{pos}} / {{total}}',
@@ -386,6 +388,8 @@ export const zhCN: Dictionary = {
       noSharedTargetCols: '所选行在目标端没有可用的共享列。',
       copyMixed: '已复制 {{copied}} 行；{{failed}} 行失败',
       copySuccess: '已复制 {{count}} 行到目标端',
+      confirmOverwriteTargetTable: '确认用源端整表覆盖目标表 "{{table}}"？这会重建目标表结构并替换全部数据。',
+      overwriteSuccess: '已用源端整表覆盖目标表 "{{table}}"',
     },
     pane: {
       rows: '{{count}} 行',

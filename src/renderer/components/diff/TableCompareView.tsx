@@ -14,7 +14,11 @@ import {
   prefetchComparedTables,
   type ComparedTableRowsQuery
 } from './table-compare-data-cache'
-import { buildCopyValues, buildRowKey } from './table-compare-utils'
+import {
+  buildCopyValues,
+  buildOverwriteTargetSyncRequest,
+  buildRowKey
+} from './table-compare-utils'
 import { TableComparePane } from './TableComparePane'
 
 interface Props {
@@ -57,6 +61,7 @@ export function TableCompareView({
   const [targetReloadToken, setTargetReloadToken] = useState(0)
   const [selectedSourceRows, setSelectedSourceRows] = useState<Record<string, Record<string, unknown>>>({})
   const [copying, setCopying] = useState(false)
+  const [overwriting, setOverwriting] = useState(false)
   const sourceScrollRef = useRef<HTMLDivElement | null>(null)
   const targetScrollRef = useRef<HTMLDivElement | null>(null)
   const syncScrollFrameRef = useRef<number | null>(null)
@@ -208,6 +213,7 @@ export function TableCompareView({
     () => getRowDiffNavigation(comparedTables, diffTables, table),
     [comparedTables, diffTables, table]
   )
+  const actionBusy = copying || overwriting
 
   const refreshBoth = () => {
     setSourceReloadToken((current) => current + 1)
@@ -328,6 +334,41 @@ export function TableCompareView({
     }
   }
 
+  const overwriteTargetTable = async () => {
+    if (!sourceState.data) return
+    if (!confirm(t('diff.compareView.confirmOverwriteTargetTable', { table }))) return
+
+    setOverwriting(true)
+
+    try {
+      const result = await unwrap(
+        api.sync.execute(
+          buildOverwriteTargetSyncRequest({
+            sourceConnectionId,
+            sourceDatabase,
+            targetConnectionId,
+            targetDatabase,
+            table
+          })
+        )
+      )
+
+      setSelectedSourceRows({})
+      setTargetReloadToken((current) => current + 1)
+
+      showToast(
+        result.errors === 0
+          ? t('diff.compareView.overwriteSuccess', { table })
+          : t('diff.sync.executeResult', { executed: result.executed, errors: result.errors }),
+        result.errors === 0 ? 'success' : 'error'
+      )
+    } catch (err) {
+      showToast((err as Error).message, 'error')
+    } finally {
+      setOverwriting(false)
+    }
+  }
+
   const syncPaneScroll = (side: 'source' | 'target', event: UIEvent<HTMLDivElement>) => {
     if (syncingScrollRef.current) return
 
@@ -379,9 +420,25 @@ export function TableCompareView({
             </Button>
             <Button
               size="sm"
+              variant="destructive"
+              onClick={overwriteTargetTable}
+              disabled={
+                actionBusy ||
+                sourceState.loading ||
+                targetState.loading ||
+                !sourceState.data
+              }
+            >
+              <ArrowRight className="mr-1 h-4 w-4" />
+              {overwriting
+                ? t('diff.compareView.overwritingTargetTable')
+                : t('diff.compareView.overwriteTargetTable')}
+            </Button>
+            <Button
+              size="sm"
               onClick={copySelectedRows}
               disabled={
-                copying ||
+                actionBusy ||
                 selectedCount === 0 ||
                 !sourceSelectionEnabled ||
                 !targetState.data ||

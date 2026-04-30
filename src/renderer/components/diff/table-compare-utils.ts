@@ -1,4 +1,12 @@
-import type { ColumnInfo } from '../../../shared/types'
+import type { ColumnInfo, SyncRequest } from '../../../shared/types'
+
+export interface BuildOverwriteTargetSyncRequestOptions {
+  sourceConnectionId: string
+  sourceDatabase: string
+  targetConnectionId: string
+  targetDatabase: string
+  table: string
+}
 
 export function buildRowKey(
   row: Record<string, unknown>,
@@ -25,4 +33,20 @@ export function buildCopyValues(
       [column.name]: row[column.name]
     }
   }, {})
+}
+
+export function buildOverwriteTargetSyncRequest(
+  options: BuildOverwriteTargetSyncRequestOptions
+): SyncRequest & { dryRun: false } {
+  return {
+    sourceConnectionId: options.sourceConnectionId,
+    sourceDatabase: options.sourceDatabase,
+    targetConnectionId: options.targetConnectionId,
+    targetDatabase: options.targetDatabase,
+    tables: [options.table],
+    syncStructure: true,
+    syncData: true,
+    existingTableStrategy: 'overwrite-structure',
+    dryRun: false
+  }
 }

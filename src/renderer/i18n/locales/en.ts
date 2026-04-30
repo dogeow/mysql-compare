@@ -378,7 +378,9 @@ export const en = {
       noSharedPk: 'No shared primary key — rows may not line up across sides.',
       selected: '{{count}} selected',
       copying: 'Copying...',
+      overwritingTargetTable: 'Overwriting...',
       copySelectedToTarget: 'Copy selected to Target',
+      overwriteTargetTable: 'Overwrite Target Table',
       prevDiff: '← Prev diff',
       diffsChanged: '{{count}} changed',
       diffPos: 'Diff {{pos}} / {{total}}',
@@ -391,6 +393,9 @@ export const en = {
       noSharedTargetCols: 'No shared target columns are available for the selected row.',
       copyMixed: 'Copied {{copied}} row(s); {{failed}} failed',
       copySuccess: 'Copied {{count}} row(s) to target',
+      confirmOverwriteTargetTable:
+        'Overwrite target table "{{table}}" with the full source table? This will recreate the target structure and replace all target data.',
+      overwriteSuccess: 'Overwrote target table "{{table}}" from the source table',
     },
     pane: {
       rows: '{{count}} rows',
