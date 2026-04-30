@@ -1,4 +1,4 @@
-import type { MouseEvent, MutableRefObject } from 'react'
+import { useMemo, type MouseEvent, type MutableRefObject } from 'react'
 import {
   ChevronDown,
   ChevronRight,
@@ -12,7 +12,8 @@ import {
   Search,
   Server,
   Table as TableIcon,
-  Trash2
+  Trash2,
+  X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
@@ -84,6 +85,29 @@ export function SidebarTree({
   onOpenTableMenu
 }: SidebarTreeProps) {
   const { t } = useI18n()
+  const connectionGroups = useMemo(() => {
+    const groups: Array<{ key: string; label: string; connections: SafeConnection[] }> = []
+    const groupByKey = new Map<string, { key: string; label: string; connections: SafeConnection[] }>()
+
+    filteredConnections.forEach((connection) => {
+      const groupName = connection.group?.trim()
+      const key = groupName || '__ungrouped'
+      let group = groupByKey.get(key)
+      if (!group) {
+        group = {
+          key,
+          label: groupName || t('sidebar.ungroupedGroup'),
+          connections: []
+        }
+        groupByKey.set(key, group)
+        groups.push(group)
+      }
+      group.connections.push(connection)
+    })
+
+    return groups
+  }, [filteredConnections, t])
+
   return (
     <>
       <div className="space-y-2 border-b border-border p-2">
@@ -93,9 +117,22 @@ export function SidebarTree({
             <Input
               value={keyword}
               onChange={(event) => onKeywordChange(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') onKeywordChange('')
+              }}
               placeholder={t('sidebar.searchConnection')}
-              className="h-8 pl-7"
+              className="h-8 pl-7 pr-7"
             />
+            {keyword && (
+              <button
+                type="button"
+                className="absolute right-1.5 top-1/2 rounded p-0.5 text-muted-foreground -translate-y-1/2 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => onKeywordChange('')}
+                title={t('common.clear')}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
           </div>
           <Button size="icon" variant="outline" onClick={onCreateConnection} title={t('sidebar.newConnection')}>
             <Plus className="h-4 w-4" />
@@ -115,26 +152,46 @@ export function SidebarTree({
           <div className="px-3 py-4 text-xs text-muted-foreground">{t('sidebar.noConnection')}</div>
         )}
 
-        {filteredConnections.map((connection) => {
-          const node = nodes[connection.id]
+        {connectionGroups.map((group) => (
+          <div key={group.key} className="pb-1">
+            <div className="mx-2 flex items-center justify-between px-1 py-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+              <span className="truncate">{group.label}</span>
+              <span>{group.connections.length}</span>
+            </div>
 
-          return (
-            <div key={connection.id}>
-              <div className="group flex cursor-pointer items-center px-2 py-1 hover:bg-accent">
+            {group.connections.map((connection) => {
+              const node = nodes[connection.id]
+
+              return (
+                <div key={connection.id}>
+              <div className="group mx-1 flex cursor-pointer items-center rounded-md px-2 py-1 hover:bg-accent focus-within:bg-accent/70">
                 <button
                   onClick={() => onToggleConnection(connection)}
-                  className="flex flex-1 items-center gap-1 text-left"
+                  aria-expanded={Boolean(node?.expanded)}
+                  className="flex min-w-0 flex-1 items-start gap-2 text-left focus-visible:outline-none"
                 >
                   {node?.expanded ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                    <ChevronDown className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                    <ChevronRight className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
                   )}
-                  <Server className="h-3.5 w-3.5 text-sky-400" />
-                  <span className="truncate">{connection.name}</span>
-                  {connection.useSSH && <span className="ml-1 text-[9px] text-amber-400">SSH</span>}
+                  <Server className="mt-0.5 h-3.5 w-3.5 text-sky-400" />
+                  <span className="min-w-0 flex-1">
+                    <span className="flex min-w-0 items-center gap-1">
+                      <span className="truncate">{connection.name}</span>
+                      <span className="rounded border border-border px-1 text-[9px] uppercase text-muted-foreground">
+                        {connection.engine}
+                      </span>
+                      {connection.useSSH && <span className="text-[9px] text-amber-400">SSH</span>}
+                    </span>
+                    <span className="block truncate text-[10px] text-muted-foreground">
+                      {connection.host}:{connection.port}
+                      {connection.database ? ` / ${connection.database}` : ''}
+                      {node?.databases ? ` · ${node.databases.length} ${t('sidebar.databasesCount')}` : ''}
+                    </span>
+                  </span>
                 </button>
-                <div className="flex opacity-0 group-hover:opacity-100">
+                <div className="flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
                   {connection.useSSH && (
                     <button
                       onClick={(event) => {
@@ -170,6 +227,10 @@ export function SidebarTree({
                   {node.databases?.map((database) => {
                     const dbExpanded = node.expandedDbs.has(database)
                     const filterValue = getTableFilter(connection.id, database)
+                    const tables = node.tables[database]
+                    const visibleTables = (tables ?? []).filter((table) => {
+                      return !filterValue || table.toLowerCase().includes(filterValue.toLowerCase())
+                    })
 
                     return (
                       <div key={database}>
@@ -187,20 +248,26 @@ export function SidebarTree({
                               database
                             }
                           }}
-                          className="flex cursor-pointer items-center px-2 py-1 hover:bg-accent"
-                          onClick={() => onToggleDatabase(connection, database)}
+                          className="mx-1 flex items-center rounded-md hover:bg-accent focus-within:bg-accent/70"
                           onContextMenu={(event) => onOpenDatabaseMenu(event, connection, database)}
                           title={t('sidebar.databaseRightClickHint')}
                         >
-                          {dbExpanded ? (
-                            <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                          ) : (
-                            <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                          )}
-                          <Database className="mx-1 h-3 w-3 text-emerald-400" />
-                          <span className="flex-1 truncate">{database}</span>
+                          <button
+                            type="button"
+                            aria-expanded={dbExpanded}
+                            className="flex min-w-0 flex-1 items-center px-2 py-1 text-left focus-visible:outline-none"
+                            onClick={() => onToggleDatabase(connection, database)}
+                          >
+                            {dbExpanded ? (
+                              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+                            ) : (
+                              <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
+                            )}
+                            <Database className="mx-1 h-3 w-3 text-emerald-400" />
+                            <span className="flex-1 truncate">{database}</span>
+                          </button>
                           {dbExpanded && (
-                            <div className="flex items-center">
+                            <div className="flex items-center pr-1">
                               <button
                                 onClick={(event) => {
                                   event.stopPropagation()
@@ -237,26 +304,47 @@ export function SidebarTree({
 
                         {dbExpanded && (
                           <div className="pl-5">
-                            <Input
-                              value={filterValue}
-                              onChange={(event) =>
-                                onTableFilterChange(connection.id, database, event.target.value)
-                              }
-                              placeholder={t('sidebar.filterTables')}
-                              className="my-1 h-6 text-xs"
-                            />
-                            {(node.tables[database] || [])
-                              .filter((table) => {
-                                return !filterValue || table.toLowerCase().includes(filterValue.toLowerCase())
-                              })
-                              .map((table) => (
+                            <div className="relative my-1">
+                              <Search className="absolute left-2 top-1/2 h-3 w-3 -translate-y-1/2 text-muted-foreground" />
+                              <Input
+                                value={filterValue}
+                                onChange={(event) =>
+                                  onTableFilterChange(connection.id, database, event.target.value)
+                                }
+                                onKeyDown={(event) => {
+                                  if (event.key === 'Escape') {
+                                    onTableFilterChange(connection.id, database, '')
+                                  }
+                                }}
+                                placeholder={t('sidebar.filterTables')}
+                                className="h-6 pl-6 pr-7 text-xs"
+                              />
+                              {filterValue && (
+                                <button
+                                  type="button"
+                                  className="absolute right-1.5 top-1/2 rounded p-0.5 text-muted-foreground -translate-y-1/2 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                                  onClick={() => onTableFilterChange(connection.id, database, '')}
+                                  title={t('common.clear')}
+                                >
+                                  <X className="h-3 w-3" />
+                                </button>
+                              )}
+                            </div>
+                            {visibleTables.map((table) => (
                                 <div
                                   key={table}
+                                  role="button"
+                                  tabIndex={0}
                                   className={cn(
-                                    'flex cursor-pointer items-center rounded px-2 py-0.5 hover:bg-accent',
-                                    isSelectedTable(connection.id, database, table) && 'bg-accent'
+                                    'flex cursor-pointer items-center rounded-md px-2 py-1 hover:bg-accent focus:bg-accent/70 focus:outline-none',
+                                    isSelectedTable(connection.id, database, table) && 'bg-accent text-foreground'
                                   )}
                                   onClick={() => onSelectTable(connection, database, table)}
+                                  onKeyDown={(event) => {
+                                    if (event.key !== 'Enter' && event.key !== ' ') return
+                                    event.preventDefault()
+                                    onSelectTable(connection, database, table)
+                                  }}
                                   onContextMenu={(event) =>
                                     onOpenTableMenu(event, connection, database, table)
                                   }
@@ -266,6 +354,11 @@ export function SidebarTree({
                                   <span className="flex-1 truncate text-xs">{table}</span>
                                 </div>
                               ))}
+                            {tables && visibleTables.length === 0 && (
+                              <div className="px-2 py-2 text-xs text-muted-foreground">
+                                {filterValue ? t('sidebar.noTablesMatch') : t('sidebar.noTables')}
+                              </div>
+                            )}
                           </div>
                         )}
                       </div>
@@ -273,9 +366,11 @@ export function SidebarTree({
                   })}
                 </div>
               )}
-            </div>
-          )
-        })}
+                </div>
+              )
+            })}
+          </div>
+        ))}
       </div>
     </>
   )

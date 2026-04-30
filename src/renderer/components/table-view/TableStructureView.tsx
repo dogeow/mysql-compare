@@ -1,12 +1,14 @@
 // 表结构视图：字段、索引、CREATE TABLE，并支持列/索引结构修改。
 import { useEffect, useMemo, useState } from 'react'
-import { Copy, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Copy, Pencil, Plus, RefreshCw, Search, Trash2, X } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import { Table, TBody, THead, Th, Tr, Td } from '@renderer/components/ui/table'
 import { Badge } from '@renderer/components/ui/badge'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n } from '@renderer/i18n'
+import { cn } from '@renderer/lib/utils'
 import type { ColumnInfo, IndexInfo, TableSchema } from '../../../shared/types'
 import { TableStructureDialogs } from './TableStructureDialogs'
 import type { ColumnDraft, IndexDraft, PendingAction } from './table-structure-types'
@@ -24,11 +26,18 @@ export function TableStructureView({ connectionId, database, table }: Props) {
   const [editingColumn, setEditingColumn] = useState<ColumnDraft | null>(null)
   const [editingIndex, setEditingIndex] = useState<IndexDraft | null>(null)
   const [pendingAction, setPendingAction] = useState<PendingAction | null>(null)
+  const [structureQuery, setStructureQuery] = useState('')
+  const [schemaLoading, setSchemaLoading] = useState(false)
   const [busy, setBusy] = useState(false)
 
   const loadSchema = async () => {
-    const next = await unwrap<TableSchema>(api.schema.getTable(connectionId, database, table))
-    setSchema(next)
+    setSchemaLoading(true)
+    try {
+      const next = await unwrap<TableSchema>(api.schema.getTable(connectionId, database, table))
+      setSchema(next)
+    } finally {
+      setSchemaLoading(false)
+    }
   }
 
   useEffect(() => {
@@ -44,6 +53,30 @@ export function TableStructureView({ connectionId, database, table }: Props) {
     if (!editingIndex) return ''
     return buildIndexSQL(database, table, editingIndex)
   }, [database, editingIndex, table])
+
+  const filteredColumns = useMemo(() => {
+    if (!schema) return []
+    const query = structureQuery.trim().toLowerCase()
+    if (!query) return schema.columns
+
+    return schema.columns.filter((column) =>
+      [column.name, column.type, column.comment, column.columnKey]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    )
+  }, [schema, structureQuery])
+
+  const filteredIndexes = useMemo(() => {
+    if (!schema) return []
+    const query = structureQuery.trim().toLowerCase()
+    if (!query) return schema.indexes
+
+    return schema.indexes.filter((index) =>
+      [index.name, index.type, index.columns.join(', '), index.unique ? t('common.yes') : t('common.no')]
+        .filter(Boolean)
+        .some((value) => value.toLowerCase().includes(query))
+    )
+  }, [schema, structureQuery, t])
 
   const startEditColumn = (column: ColumnInfo) => {
     setEditingColumn({
@@ -147,12 +180,62 @@ export function TableStructureView({ connectionId, database, table }: Props) {
     }
   }
 
-  if (!schema) return <div className="p-3 text-xs text-muted-foreground">{t('common.loading')}</div>
+  if (!schema) {
+    return (
+      <div className="flex h-full items-center justify-center gap-2 p-3 text-xs text-muted-foreground">
+        <RefreshCw className="h-3.5 w-3.5 animate-spin" />
+        {t('common.loading')}
+      </div>
+    )
+  }
 
   return (
-    <div className="h-full min-h-0 overflow-auto p-3 pb-8 space-y-4">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 border-b border-border bg-card/70 px-3 py-2">
+        <div className="flex flex-wrap items-center gap-2 text-xs">
+          <Badge>{t('tableStructure.columnCount', { count: schema.columns.length })}</Badge>
+          <Badge>{t('tableStructure.indexCount', { count: schema.indexes.length })}</Badge>
+          {schema.primaryKey.length > 0 && (
+            <Badge variant="warning">{t('tableStructure.primaryKey', { columns: schema.primaryKey.join(', ') })}</Badge>
+          )}
+        </div>
+        <div className="flex min-w-[18rem] flex-1 items-center justify-end gap-2">
+          <div className="relative w-full max-w-sm">
+            <Search className="absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
+            <Input
+              value={structureQuery}
+              onChange={(event) => setStructureQuery(event.target.value)}
+              onKeyDown={(event) => {
+                if (event.key === 'Escape') setStructureQuery('')
+              }}
+              placeholder={t('tableStructure.searchPlaceholder')}
+              className="h-8 pl-8 pr-8 text-xs"
+            />
+            {structureQuery && (
+              <button
+                type="button"
+                className="absolute right-2 top-1/2 rounded p-0.5 text-muted-foreground -translate-y-1/2 hover:bg-accent hover:text-foreground focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                onClick={() => setStructureQuery('')}
+                title={t('common.clear')}
+              >
+                <X className="h-3.5 w-3.5" />
+              </button>
+            )}
+          </div>
+          <Button size="sm" variant="ghost" onClick={() => loadSchema().catch((e) => showToast((e as Error).message, 'error'))} disabled={schemaLoading}>
+            <RefreshCw className={cn('h-4 w-4', schemaLoading && 'animate-spin')} />
+          </Button>
+        </div>
+      </div>
+
+      <div className="min-h-0 flex-1 space-y-4 overflow-auto p-3 pb-8">
       <section>
-        <h3 className="mb-2 text-sm font-medium">{t('common.columns')}</h3>
+        <div className="mb-2 flex items-center justify-between gap-2">
+          <h3 className="text-sm font-medium">{t('common.columns')}</h3>
+          <span className="text-xs text-muted-foreground">
+            {t('tableStructure.visibleColumns', { visible: filteredColumns.length, total: schema.columns.length })}
+          </span>
+        </div>
         <Table>
           <THead>
             <Tr>
@@ -167,7 +250,7 @@ export function TableStructureView({ connectionId, database, table }: Props) {
             </Tr>
           </THead>
           <TBody>
-            {schema.columns.map((column) => (
+            {filteredColumns.map((column) => (
               <Tr key={column.name}>
                 <Td>{column.name}</Td>
                 <Td className="text-muted-foreground">{column.type}</Td>
@@ -188,14 +271,24 @@ export function TableStructureView({ connectionId, database, table }: Props) {
             ))}
           </TBody>
         </Table>
+        {filteredColumns.length === 0 && (
+          <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            {t('tableStructure.noColumnsMatch')}
+          </div>
+        )}
       </section>
 
       <section>
         <div className="mb-2 flex items-center justify-between gap-2">
           <h3 className="text-sm font-medium">{t('tableStructure.indexes')}</h3>
-          <Button size="sm" variant="outline" onClick={startAddIndex}>
-            <Plus className="h-3.5 w-3.5" /> {t('tableStructure.addIndex')}
-          </Button>
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-muted-foreground">
+              {t('tableStructure.visibleIndexes', { visible: filteredIndexes.length, total: schema.indexes.length })}
+            </span>
+            <Button size="sm" variant="outline" onClick={startAddIndex}>
+              <Plus className="h-3.5 w-3.5" /> {t('tableStructure.addIndex')}
+            </Button>
+          </div>
         </div>
         <Table>
           <THead>
@@ -208,7 +301,7 @@ export function TableStructureView({ connectionId, database, table }: Props) {
             </Tr>
           </THead>
           <TBody>
-            {schema.indexes.map((index) => (
+            {filteredIndexes.map((index) => (
               <Tr key={index.name}>
                 <Td>{index.name}</Td>
                 <Td>{index.columns.join(', ')}</Td>
@@ -228,6 +321,11 @@ export function TableStructureView({ connectionId, database, table }: Props) {
             ))}
           </TBody>
         </Table>
+        {filteredIndexes.length === 0 && (
+          <div className="rounded-md border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+            {schema.indexes.length === 0 ? t('tableStructure.noIndexes') : t('tableStructure.noIndexesMatch')}
+          </div>
+        )}
       </section>
 
       <section>
@@ -248,6 +346,7 @@ export function TableStructureView({ connectionId, database, table }: Props) {
 {schema.createSQL}
         </pre>
       </section>
+      </div>
 
       <TableStructureDialogs
         database={database}

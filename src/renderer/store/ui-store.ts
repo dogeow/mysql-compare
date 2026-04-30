@@ -46,6 +46,10 @@ interface UIState {
   setRightView: (v: RightView) => void
   setActiveTab: (tabId: string) => void
   closeTab: (tabId: string) => void
+  closeOtherTabs: (tabId: string) => void
+  closeTabsToRight: (tabId: string) => void
+  closeAllTabs: () => void
+  moveTab: (tabId: string, targetTabId: string) => void
   registerTabCloseGuard: (tabId: string, guard: () => boolean) => () => void
   confirmSSHPathTabRetarget: (connectionId: string, oldPath: string) => boolean
   renameTableTabs: (connectionId: string, database: string, oldTable: string, newTable: string) => void
@@ -54,6 +58,7 @@ interface UIState {
   refreshTableData: (connectionId: string, database: string, table: string) => void
   toast: { message: string; level: 'info' | 'error' | 'success' } | null
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
+  clearToast: () => void
 }
 
 function isSameOrDescendantRemotePath(path: string, root: string): boolean {
@@ -138,6 +143,28 @@ function pickActiveState(tabs: WorkspaceTab[], preferredIndex: number): ActiveSt
   }
 }
 
+function tabCanClose(tabId: string): boolean {
+  return tabCloseGuards.get(tabId)?.() ?? true
+}
+
+function pickActiveById(tabs: WorkspaceTab[], activeTabId: string | null, preferredTabId?: string): ActiveState {
+  if (tabs.length === 0) {
+    return {
+      activeTabId: null,
+      rightView: { kind: 'empty' }
+    }
+  }
+
+  const preferredTab = preferredTabId ? tabs.find((tab) => tab.id === preferredTabId) : undefined
+  const activeTab = activeTabId ? tabs.find((tab) => tab.id === activeTabId) : undefined
+  const nextTab = preferredTab ?? activeTab ?? tabs[0]!
+
+  return {
+    activeTabId: nextTab.id,
+    rightView: nextTab.view
+  }
+}
+
 export const useUIStore = create<UIState>((set) => ({
   rightView: { kind: 'empty' },
   workspaceTabs: [],
@@ -169,8 +196,7 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   closeTab: (tabId) =>
     set((state) => {
-      const allowClose = tabCloseGuards.get(tabId)?.() ?? true
-      if (!allowClose) return state
+      if (!tabCanClose(tabId)) return state
       const index = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
       if (index < 0) return state
       const workspaceTabs = state.workspaceTabs.filter((tab) => tab.id !== tabId)
@@ -178,6 +204,64 @@ export const useUIStore = create<UIState>((set) => ({
         return { ...state, workspaceTabs }
       }
       return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, index - 1) }
+    }),
+  closeOtherTabs: (tabId) =>
+    set((state) => {
+      const anchor = state.workspaceTabs.find((tab) => tab.id === tabId)
+      if (!anchor) return state
+
+      const workspaceTabs = state.workspaceTabs.filter((tab) => tab.id === tabId || !tabCanClose(tab.id))
+      if (workspaceTabs.length === state.workspaceTabs.length) return state
+
+      return {
+        ...state,
+        workspaceTabs,
+        activeTabId: anchor.id,
+        rightView: anchor.view
+      }
+    }),
+  closeTabsToRight: (tabId) =>
+    set((state) => {
+      const anchorIndex = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
+      if (anchorIndex < 0) return state
+
+      const workspaceTabs = state.workspaceTabs.filter(
+        (tab, index) => index <= anchorIndex || !tabCanClose(tab.id)
+      )
+      if (workspaceTabs.length === state.workspaceTabs.length) return state
+      const activeKept = workspaceTabs.some((tab) => tab.id === state.activeTabId)
+
+      return {
+        ...state,
+        workspaceTabs,
+        ...pickActiveById(workspaceTabs, state.activeTabId, activeKept ? undefined : tabId)
+      }
+    }),
+  closeAllTabs: () =>
+    set((state) => {
+      const workspaceTabs = state.workspaceTabs.filter((tab) => !tabCanClose(tab.id))
+      if (workspaceTabs.length === state.workspaceTabs.length) return state
+
+      return {
+        ...state,
+        workspaceTabs,
+        ...pickActiveById(workspaceTabs, state.activeTabId)
+      }
+    }),
+  moveTab: (tabId, targetTabId) =>
+    set((state) => {
+      if (tabId === targetTabId) return state
+      const sourceIndex = state.workspaceTabs.findIndex((tab) => tab.id === tabId)
+      const targetIndex = state.workspaceTabs.findIndex((tab) => tab.id === targetTabId)
+      if (sourceIndex < 0 || targetIndex < 0) return state
+
+      const workspaceTabs = [...state.workspaceTabs]
+      const [tab] = workspaceTabs.splice(sourceIndex, 1)
+      if (!tab) return state
+      const adjustedTargetIndex = sourceIndex < targetIndex ? targetIndex - 1 : targetIndex
+      workspaceTabs.splice(adjustedTargetIndex, 0, tab)
+
+      return { ...state, workspaceTabs }
     }),
   registerTabCloseGuard: (tabId, guard) => {
     tabCloseGuards.set(tabId, guard)
@@ -348,5 +432,12 @@ export const useUIStore = create<UIState>((set) => ({
       set({ toast: null })
       toastTimer = null
     }, 3000)
+  },
+  clearToast: () => {
+    if (toastTimer) {
+      clearTimeout(toastTimer)
+      toastTimer = null
+    }
+    set({ toast: null })
   }
 }))

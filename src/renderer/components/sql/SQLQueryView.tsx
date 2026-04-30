@@ -1,10 +1,10 @@
-import { useMemo, useRef, useState } from 'react'
-import { FileUp, FolderOpen, Play, RotateCcw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { ClipboardCopy, FileUp, FolderOpen, History, Play, RotateCcw, Rows3, SplitSquareVertical } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
+import { Dialog } from '@renderer/components/ui/dialog'
 import { Table, TBody, Td, THead, Th, Tr } from '@renderer/components/ui/table'
 import { api, unwrap } from '@renderer/lib/api'
-import { cn } from '@renderer/lib/utils'
-import { formatCellValue } from '@renderer/lib/utils'
+import { cn, formatCellValue } from '@renderer/lib/utils'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n, type Translator } from '@renderer/i18n'
 
@@ -20,23 +20,131 @@ type SQLExecutionResult =
   | { kind: 'batch'; statements: number; affectedRows: number; details: string[] }
   | { kind: 'empty'; message: string }
 
+interface SQLHistoryEntry {
+  id: string
+  sql: string
+  ranAt: number
+}
+
+const SQL_EDITOR_SIZE_STORAGE_KEY = 'mysql-compare:sql-editor-percent'
+const MAX_SQL_HISTORY = 20
+
+function clampEditorPercent(value: number): number {
+  return Math.max(25, Math.min(75, value))
+}
+
+function readStoredEditorPercent(): number {
+  if (typeof window === 'undefined') return 42
+  const raw = window.localStorage.getItem(SQL_EDITOR_SIZE_STORAGE_KEY)
+  const parsed = raw ? Number.parseFloat(raw) : Number.NaN
+  return Number.isFinite(parsed) ? clampEditorPercent(parsed) : 42
+}
+
+function getHistoryStorageKey(connectionId: string, database: string): string {
+  return `mysql-compare:sql-history:${connectionId}:${database}`
+}
+
+function readSQLHistory(connectionId: string, database: string): SQLHistoryEntry[] {
+  if (typeof window === 'undefined') return []
+  try {
+    const raw = window.localStorage.getItem(getHistoryStorageKey(connectionId, database))
+    if (!raw) return []
+    const parsed = JSON.parse(raw) as SQLHistoryEntry[]
+    return Array.isArray(parsed)
+      ? parsed.filter((entry) => entry?.id && entry.sql).slice(0, MAX_SQL_HISTORY)
+      : []
+  } catch {
+    return []
+  }
+}
+
+function writeSQLHistory(connectionId: string, database: string, history: SQLHistoryEntry[]): void {
+  if (typeof window === 'undefined') return
+  try {
+    window.localStorage.setItem(getHistoryStorageKey(connectionId, database), JSON.stringify(history))
+  } catch {
+    /* ignore */
+  }
+}
+
 export function SQLQueryView({ connectionId, connectionName, database }: Props) {
   const { showToast } = useUIStore()
   const { t } = useI18n()
   const [sql, setSQL] = useState(() => t('sql.placeholder'))
+  const [selectedSQL, setSelectedSQL] = useState('')
   const [running, setRunning] = useState(false)
   const [result, setResult] = useState<SQLExecutionResult | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [dragging, setDragging] = useState(false)
+  const [historyOpen, setHistoryOpen] = useState(false)
+  const [history, setHistory] = useState<SQLHistoryEntry[]>(() => readSQLHistory(connectionId, database))
+  const [editorPercent, setEditorPercent] = useState(() => readStoredEditorPercent())
   const fileInputRef = useRef<HTMLInputElement | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement | null>(null)
+  const splitContainerRef = useRef<HTMLDivElement | null>(null)
+  const resizeStateRef = useRef<{ top: number; height: number } | null>(null)
 
   const subtitle = useMemo(() => {
     if (connectionName) return `${connectionName} / ${database}`
     return database
   }, [connectionName, database])
 
-  const runSQL = async () => {
-    const statement = sql.trim()
+  useEffect(() => {
+    setHistory(readSQLHistory(connectionId, database))
+  }, [connectionId, database])
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    window.localStorage.setItem(SQL_EDITOR_SIZE_STORAGE_KEY, String(editorPercent))
+  }, [editorPercent])
+
+  useEffect(() => {
+    const onMouseMove = (event: MouseEvent) => {
+      const state = resizeStateRef.current
+      if (!state) return
+      const nextPercent = ((event.clientY - state.top) / state.height) * 100
+      setEditorPercent(clampEditorPercent(nextPercent))
+    }
+
+    const onMouseUp = () => {
+      if (!resizeStateRef.current) return
+      resizeStateRef.current = null
+      document.body.style.cursor = ''
+      document.body.style.userSelect = ''
+    }
+
+    window.addEventListener('mousemove', onMouseMove)
+    window.addEventListener('mouseup', onMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', onMouseMove)
+      window.removeEventListener('mouseup', onMouseUp)
+    }
+  }, [])
+
+  const syncSelectedSQL = () => {
+    const textarea = textareaRef.current
+    if (!textarea) {
+      setSelectedSQL('')
+      return
+    }
+    setSelectedSQL(textarea.value.slice(textarea.selectionStart, textarea.selectionEnd).trim())
+  }
+
+  const rememberStatement = (statement: string) => {
+    setHistory((current) => {
+      const normalized = statement.trim()
+      const next = [
+        { id: `${Date.now()}`, sql: normalized, ranAt: Date.now() },
+        ...current.filter((entry) => entry.sql.trim() !== normalized)
+      ].slice(0, MAX_SQL_HISTORY)
+      writeSQLHistory(connectionId, database, next)
+      return next
+    })
+  }
+
+  const runSQL = async (statementOverride?: string) => {
+    const source = statementOverride ?? (selectedSQL || sql)
+    const statement = source.trim()
     if (!statement) {
       showToast(t('sql.empty'), 'error')
       return
@@ -47,6 +155,7 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
       const raw = await unwrap(api.db.executeSQL(connectionId, statement, database))
       const normalized = normalizeResult(raw, t)
       setResult(normalized)
+      rememberStatement(statement)
       showToast(t('sql.executed'), 'success')
     } catch (err) {
       const message = (err as Error).message
@@ -68,15 +177,33 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
     }
   }
 
+  const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
+    const container = splitContainerRef.current
+    if (!container) return
+    const rect = container.getBoundingClientRect()
+    resizeStateRef.current = { top: rect.top, height: rect.height }
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+    event.preventDefault()
+  }
+
   return (
     <div className="flex h-full flex-col overflow-hidden">
       <div className="border-b border-border bg-card px-3 py-2">
-        <div className="flex items-center justify-between gap-3">
+        <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="min-w-0">
             <div className="text-sm font-medium">{t('sql.consoleTitle')}</div>
             <div className="truncate text-xs text-muted-foreground">{subtitle}</div>
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => setHistoryOpen(true)}
+              disabled={history.length === 0}
+            >
+              <History className="h-4 w-4" /> {t('sql.history')}
+            </Button>
             <Button size="sm" variant="outline" onClick={() => setSQL(t('sql.placeholder'))} disabled={running}>
               <RotateCcw className="h-4 w-4" /> {t('sql.reset')}
             </Button>
@@ -88,17 +215,26 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
             >
               <FolderOpen className="h-4 w-4" /> {t('sql.openFile')}
             </Button>
-            <Button size="sm" onClick={runSQL} disabled={running}>
+            <Button size="sm" variant="outline" onClick={() => runSQL(selectedSQL)} disabled={running || !selectedSQL}>
+              <Rows3 className="h-4 w-4" /> {t('sql.runSelected')}
+            </Button>
+            <Button size="sm" onClick={() => runSQL()} disabled={running}>
               <Play className="h-4 w-4" /> {running ? t('sql.running') : t('sql.run')}
             </Button>
           </div>
         </div>
       </div>
 
-      <div className="grid min-h-0 flex-1 grid-rows-[minmax(220px,40%)_minmax(0,1fr)]">
+      <div
+        ref={splitContainerRef}
+        className="grid min-h-0 flex-1"
+        style={{
+          gridTemplateRows: `minmax(180px, ${editorPercent}%) 6px minmax(0, 1fr)`
+        }}
+      >
         <div
           className={cn(
-            'border-b border-border p-3 transition-colors',
+            'min-h-0 p-3 transition-colors',
             dragging && 'bg-accent/40'
           )}
           onDragEnter={(event) => {
@@ -131,8 +267,15 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
             }}
           />
           <textarea
+            ref={textareaRef}
             value={sql}
-            onChange={(event) => setSQL(event.target.value)}
+            onChange={(event) => {
+              setSQL(event.target.value)
+              requestAnimationFrame(syncSelectedSQL)
+            }}
+            onSelect={syncSelectedSQL}
+            onMouseUp={syncSelectedSQL}
+            onKeyUp={syncSelectedSQL}
             onKeyDown={(event) => {
               if ((event.metaKey || event.ctrlKey) && event.key === 'Enter') {
                 event.preventDefault()
@@ -144,8 +287,21 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
           />
           <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
             <FileUp className="h-3.5 w-3.5" />
-            <span>{t('sql.dropFileHint')}</span>
+            <span className="truncate">
+              {selectedSQL ? t('sql.selectionActive', { count: selectedSQL.length }) : t('sql.dropFileHint')}
+            </span>
           </div>
+        </div>
+
+        <div
+          role="separator"
+          aria-orientation="horizontal"
+          aria-label={t('sql.resizeEditor')}
+          className="group flex cursor-row-resize items-center justify-center border-y border-border bg-card/80"
+          onMouseDown={startResize}
+          onDoubleClick={() => setEditorPercent(42)}
+        >
+          <SplitSquareVertical className="h-3.5 w-3.5 text-muted-foreground transition-colors group-hover:text-foreground" />
         </div>
 
         <div className="min-h-0 overflow-hidden p-3">
@@ -162,12 +318,93 @@ export function SQLQueryView({ connectionId, connectionName, database }: Props) 
           )}
         </div>
       </div>
+
+      {historyOpen && (
+        <Dialog
+          open
+          onOpenChange={setHistoryOpen}
+          title={t('sql.history')}
+          description={t('sql.historyDescription')}
+          className="max-w-3xl"
+          footer={
+            <>
+              <Button
+                variant="outline"
+                onClick={() => {
+                  setHistory([])
+                  writeSQLHistory(connectionId, database, [])
+                }}
+                disabled={history.length === 0}
+              >
+                {t('sql.clearHistory')}
+              </Button>
+              <Button onClick={() => setHistoryOpen(false)}>{t('common.close')}</Button>
+            </>
+          }
+        >
+          <div className="max-h-[60vh] space-y-2 overflow-auto">
+            {history.map((entry) => (
+              <div key={entry.id} className="rounded-md border border-border bg-background p-2">
+                <div className="mb-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                  <span>{new Date(entry.ranAt).toLocaleString()}</span>
+                  <div className="flex items-center gap-1">
+                    <Button
+                      size="sm"
+                      variant="ghost"
+                      onClick={() => {
+                        setSQL(entry.sql)
+                        setHistoryOpen(false)
+                      }}
+                    >
+                      {t('sql.loadHistory')}
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setHistoryOpen(false)
+                        void runSQL(entry.sql)
+                      }}
+                    >
+                      <Play className="h-4 w-4" /> {t('sql.run')}
+                    </Button>
+                  </div>
+                </div>
+                <pre className="max-h-28 overflow-auto whitespace-pre-wrap rounded bg-card p-2 font-mono text-xs">
+                  {entry.sql}
+                </pre>
+              </div>
+            ))}
+          </div>
+        </Dialog>
+      )}
     </div>
   )
 }
 
 function ResultPanel({ result }: { result: SQLExecutionResult }) {
   const { t } = useI18n()
+  const { showToast } = useUIStore()
+
+  const copyRows = async (format: 'json' | 'tsv') => {
+    if (result.kind !== 'rows') return
+    const content =
+      format === 'json'
+        ? JSON.stringify(result.rows, null, 2)
+        : [
+            result.columns.join('\t'),
+            ...result.rows.map((row) =>
+              result.columns.map((column) => formatCellValue(row[column]).replace(/\t/g, ' ')).join('\t')
+            )
+          ].join('\n')
+
+    try {
+      await navigator.clipboard.writeText(content)
+      showToast(t(format === 'json' ? 'sql.copiedJson' : 'sql.copiedTsv'), 'success')
+    } catch (err) {
+      showToast((err as Error).message, 'error')
+    }
+  }
 
   if (result.kind === 'empty') {
     return (
@@ -205,8 +442,16 @@ function ResultPanel({ result }: { result: SQLExecutionResult }) {
 
   return (
     <div className="flex h-full flex-col overflow-hidden rounded-md border border-border bg-card">
-      <div className="border-b border-border px-3 py-2 text-xs text-muted-foreground">
-        {t('sql.rowCount', { count: result.rows.length.toLocaleString() })}
+      <div className="flex items-center justify-between gap-2 border-b border-border px-3 py-2 text-xs text-muted-foreground">
+        <span>{t('sql.rowCount', { count: result.rows.length.toLocaleString() })}</span>
+        <div className="flex items-center gap-1">
+          <Button size="sm" variant="ghost" onClick={() => copyRows('tsv')}>
+            <ClipboardCopy className="h-4 w-4" /> {t('sql.copyTsv')}
+          </Button>
+          <Button size="sm" variant="ghost" onClick={() => copyRows('json')}>
+            <ClipboardCopy className="h-4 w-4" /> {t('sql.copyJson')}
+          </Button>
+        </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
         <Table>
