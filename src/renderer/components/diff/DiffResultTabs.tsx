@@ -22,7 +22,7 @@ import {
 } from './diff-panel-presentation'
 import { TableListPanel } from './TableListPanel'
 import { ComparisonStatusPanel } from './ComparisonStatusPanel'
-import type { TableCompareEntry, TableStatusFilter } from './diff-panel-utils'
+import { matchesTableSearchQuery, type TableCompareEntry, type TableStatusFilter } from './diff-panel-utils'
 
 interface TablesTabContentProps {
   sourceTables: string[]
@@ -178,6 +178,9 @@ export function StatusTabContent({
 interface SchemaTabContentProps {
   schemaDiffs: TableDiff[]
   hasRowComparisonResults: boolean
+  tableSearchQuery: string
+  onSearchChange: (value: string) => void
+  onClearSearch: () => void
   onOpenCompare: (table: string) => void
   onOpenSource: (table: string) => void
   onOpenTarget: (table: string) => void
@@ -186,11 +189,18 @@ interface SchemaTabContentProps {
 export function SchemaTabContent({
   schemaDiffs,
   hasRowComparisonResults,
+  tableSearchQuery,
+  onSearchChange,
+  onClearSearch,
   onOpenCompare,
   onOpenSource,
   onOpenTarget
 }: SchemaTabContentProps) {
   const { t } = useI18n()
+  const filteredSchemaDiffs = schemaDiffs.filter((td) =>
+    matchesTableSearchQuery(td.table, tableSearchQuery)
+  )
+
   if (schemaDiffs.length === 0) {
     return (
       <EmptyResultState
@@ -206,7 +216,24 @@ export function SchemaTabContent({
 
   return (
     <div className="space-y-3">
-      {schemaDiffs.map((td) => (
+      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+        <Input
+          value={tableSearchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t('diff.result.searchTable')}
+          className="h-8 w-40 text-xs"
+        />
+        {tableSearchQuery && (
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={onClearSearch}>
+            {t('common.clear')}
+          </Button>
+        )}
+        <Badge>{filteredSchemaDiffs.length}</Badge>
+      </div>
+      {filteredSchemaDiffs.length === 0 ? (
+        <div className="text-xs text-muted-foreground">{t('diff.result.noTablesMatch')}</div>
+      ) : (
+        filteredSchemaDiffs.map((td) => (
         <div key={td.table} className="rounded-xl bg-card/20">
           <div className="flex flex-wrap items-center gap-2 border-b border-border/50 bg-card/40 px-3 py-2">
             <strong className="text-sm">{td.table}</strong>
@@ -249,7 +276,8 @@ export function SchemaTabContent({
             </div>
           )}
         </div>
-      ))}
+        ))
+      )}
     </div>
   )
 }

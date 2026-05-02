@@ -1,15 +1,19 @@
 // Content diff tab 中按表展示行级对比详情的区域，包含 “Show all/Only different” 切换。
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
+import { Input } from '@renderer/components/ui/input'
 import type { TableDataDiff, TableRowComparison } from '../../../shared/types'
 import { useI18n } from '@renderer/i18n'
-import { filterChangedRowComparisons } from './diff-panel-utils'
+import { filterChangedRowComparisons, matchesTableSearchQuery } from './diff-panel-utils'
 import { formatDataSummary } from './diff-panel-formatters'
 import { TableOpenActions } from './diff-panel-presentation'
 
 interface RowComparisonSectionProps {
   rowComparisons: TableRowComparison[]
   showAll: boolean
+  tableSearchQuery: string
+  onSearchChange: (value: string) => void
+  onClearSearch: () => void
   onToggleShowAll: () => void
   onOpenCompare: (table: string) => void
   onOpenSource: (table: string) => void
@@ -19,6 +23,9 @@ interface RowComparisonSectionProps {
 export function RowComparisonSection({
   rowComparisons,
   showAll,
+  tableSearchQuery,
+  onSearchChange,
+  onClearSearch,
   onToggleShowAll,
   onOpenCompare,
   onOpenSource,
@@ -26,14 +33,29 @@ export function RowComparisonSection({
 }: RowComparisonSectionProps) {
   const { t } = useI18n()
   const changedRowComparisons = filterChangedRowComparisons(rowComparisons)
-  const visibleRowComparisons = showAll ? rowComparisons : changedRowComparisons
+  const baseRowComparisons = showAll ? rowComparisons : changedRowComparisons
+  const visibleRowComparisons = baseRowComparisons.filter((rowComparison) =>
+    matchesTableSearchQuery(rowComparison.table, tableSearchQuery)
+  )
   const hiddenTableCount = rowComparisons.length - changedRowComparisons.length
+  const hasActiveSearch = tableSearchQuery.trim().length > 0
 
   return (
     <div className="rounded-xl bg-card/15">
-      <div className="flex items-center gap-2 px-3 py-2">
+      <div className="flex flex-wrap items-center gap-2 px-3 py-2">
         <strong className="text-sm">{t('diff.rowCompare.title')}</strong>
         <Badge>{t('diff.rowCompare.tableCount', { count: rowComparisons.length })}</Badge>
+        <Input
+          value={tableSearchQuery}
+          onChange={(event) => onSearchChange(event.target.value)}
+          placeholder={t('diff.result.searchTable')}
+          className="h-8 w-40 text-xs"
+        />
+        {hasActiveSearch && (
+          <Button size="sm" variant="ghost" className="h-8 px-2" onClick={onClearSearch}>
+            {t('common.clear')}
+          </Button>
+        )}
         {hiddenTableCount > 0 && (
           <Button
             size="sm"
@@ -48,7 +70,7 @@ export function RowComparisonSection({
       <div className="divide-y divide-border/30 border-t border-border/30">
         {visibleRowComparisons.length === 0 ? (
           <div className="px-3 py-6 text-xs text-muted-foreground">
-            {t('diff.rowCompare.noDiffsHint')}
+            {hasActiveSearch ? t('diff.result.noTablesMatch') : t('diff.rowCompare.noDiffsHint')}
           </div>
         ) : (
           visibleRowComparisons.map((rowComparison) => (

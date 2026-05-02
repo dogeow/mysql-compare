@@ -1,5 +1,5 @@
 // 数据库对比面板：先加载两边表列表，再逐表对比并渐进展示结果。
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import type { DatabaseDiff } from '../../../shared/types'
@@ -7,12 +7,17 @@ import {
   buildDatabaseDiff,
   filterChangedRowComparisons,
   filterComparisonEntries,
+  filterDiffEndpointHistoryByConnections,
+  createDiffEndpointHistoryKey,
   getPreferredComparisonTable,
+  hasCompleteDiffEndpointSelection,
   hasSchemaOrPresenceDiff,
   hasNoRowDifferences,
   parseTableCompareConcurrency,
   prioritizeComparisonEntries,
   TABLE_COMPARE_CONCURRENCY_OPTIONS,
+  upsertDiffEndpointHistory,
+  type DiffEndpointSelection,
   type DiffResultTab
 } from './diff-panel-utils'
 import {
@@ -43,10 +48,12 @@ export function DiffPanel() {
   const { setRightView, showToast } = useUIStore()
   const { t } = useI18n()
 
+  const restoredEndpointHistoryRef = useRef(false)
   const [srcId, setSrcId] = useState('')
   const [tgtId, setTgtId] = useState('')
   const [srcDb, setSrcDb] = useState('')
   const [tgtDb, setTgtDb] = useState('')
+  const [connectionsReady, setConnectionsReady] = useState(false)
   const { databases: srcDbs, loading: srcDbsLoading } = useDatabaseList(srcId, showToast)
   const { databases: tgtDbs, loading: tgtDbsLoading } = useDatabaseList(tgtId, showToast)
   const [selectedComparisonTable, setSelectedComparisonTable] = useState<string | null>(null)
@@ -78,26 +85,61 @@ export function DiffPanel() {
     showToast,
     t,
     onBeforeCompare: () => {
+      const endpointSelection: DiffEndpointSelection = {
+        sourceConnectionId: srcId,
+        sourceDatabase: srcDb,
+        targetConnectionId: tgtId,
+        targetDatabase: tgtDb
+      }
       setSelectedComparisonTable(null)
       setPreferences((current) => ({
         ...current,
         resultTab: 'status',
-        setupExpanded: false
+        setupExpanded: false,
+        endpointHistory: upsertDiffEndpointHistory(current.endpointHistory, endpointSelection)
       }))
     }
   })
 
   useEffect(() => {
-    refresh()
-  }, [refresh])
+    let active = true
+    setConnectionsReady(false)
+    void refresh()
+      .catch((err) => showToast((err as Error).message, 'error'))
+      .finally(() => {
+        if (active) setConnectionsReady(true)
+      })
+    return () => {
+      active = false
+    }
+  }, [refresh, showToast])
+
+  const connectionIds = useMemo(
+    () => new Set(connections.map((connection) => connection.id)),
+    [connections]
+  )
+  const connectionNameById = useMemo(
+    () => new Map(connections.map((connection) => [connection.id, connection.name])),
+    [connections]
+  )
+  const validEndpointHistory = useMemo(
+    () => filterDiffEndpointHistoryByConnections(preferences.endpointHistory, connectionIds),
+    [connectionIds, preferences.endpointHistory]
+  )
 
   useEffect(() => {
-    setSrcDb('')
-  }, [srcId])
+    if (restoredEndpointHistoryRef.current || !connectionsReady) return
+    restoredEndpointHistoryRef.current = true
+    if (srcId || srcDb || tgtId || tgtDb) return
 
-  useEffect(() => {
-    setTgtDb('')
-  }, [tgtId])
+    const [latestHistory] = validEndpointHistory
+    if (!latestHistory) return
+
+    setSrcId(latestHistory.sourceConnectionId)
+    setSrcDb(latestHistory.sourceDatabase)
+    setTgtId(latestHistory.targetConnectionId)
+    setTgtDb(latestHistory.targetDatabase)
+  }, [connectionsReady, srcDb, srcId, tgtDb, tgtId, validEndpointHistory])
 
   const diff = useMemo<DatabaseDiff | null>(() => {
     if (!compareContext) return null
@@ -180,6 +222,68 @@ export function DiffPanel() {
   )
   const sourceDatabaseOptions = buildDatabaseOptions(srcId, srcDbs, srcDbsLoading, t)
   const targetDatabaseOptions = buildDatabaseOptions(tgtId, tgtDbs, tgtDbsLoading, t)
+  const currentEndpointSelection: DiffEndpointSelection = {
+    sourceConnectionId: srcId,
+    sourceDatabase: srcDb,
+    targetConnectionId: tgtId,
+    targetDatabase: tgtDb
+  }
+  const currentEndpointHistoryKey = hasCompleteDiffEndpointSelection(currentEndpointSelection)
+    ? createDiffEndpointHistoryKey(currentEndpointSelection)
+    : ''
+  const endpointHistoryOptions = useMemo(
+    () => [
+      {
+        value: '',
+        label:
+          validEndpointHistory.length > 0
+            ? t('diff.history.placeholder')
+            : t('diff.history.empty')
+      },
+      ...validEndpointHistory.map((item) => {
+        const sourceName =
+          connectionNameById.get(item.sourceConnectionId) ?? item.sourceConnectionId
+        const targetName =
+          connectionNameById.get(item.targetConnectionId) ?? item.targetConnectionId
+        return {
+          value: createDiffEndpointHistoryKey(item),
+          label: `${sourceName} / ${item.sourceDatabase} -> ${targetName} / ${item.targetDatabase}`
+        }
+      })
+    ],
+    [connectionNameById, t, validEndpointHistory]
+  )
+  const selectedEndpointHistoryValue = endpointHistoryOptions.some(
+    (option) => option.value === currentEndpointHistoryKey
+  )
+    ? currentEndpointHistoryKey
+    : ''
+
+  const handleSourceConnectionChange = (value: string) => {
+    setSrcId(value)
+    setSrcDb('')
+  }
+
+  const handleTargetConnectionChange = (value: string) => {
+    setTgtId(value)
+    setTgtDb('')
+  }
+
+  const handleEndpointHistoryChange = (value: string) => {
+    const historyItem = validEndpointHistory.find(
+      (item) => createDiffEndpointHistoryKey(item) === value
+    )
+    if (!historyItem) return
+
+    setSrcId(historyItem.sourceConnectionId)
+    setSrcDb(historyItem.sourceDatabase)
+    setTgtId(historyItem.targetConnectionId)
+    setTgtDb(historyItem.targetDatabase)
+  }
+
+  const handleClearEndpointHistory = () => {
+    setPreferences((current) => ({ ...current, endpointHistory: [] }))
+  }
 
   useEffect(() => {
     const preferredTable = getPreferredComparisonTable(
@@ -273,12 +377,19 @@ export function DiffPanel() {
         onToggle={() =>
           setPreferences((current) => ({ ...current, setupExpanded: !current.setupExpanded }))
         }
+        history={{
+          options: endpointHistoryOptions,
+          value: selectedEndpointHistoryValue,
+          disabled: validEndpointHistory.length === 0,
+          onChange: handleEndpointHistoryChange,
+          onClear: handleClearEndpointHistory
+        }}
         source={{
           connectionName: selectedSourceConnection?.name,
           database: srcDb,
           connectionOptions: connOptions,
           connectionValue: srcId,
-          onConnectionChange: setSrcId,
+          onConnectionChange: handleSourceConnectionChange,
           databaseOptions: sourceDatabaseOptions,
           databaseValue: srcDb,
           databaseDisabled: !srcId || srcDbsLoading,
@@ -290,7 +401,7 @@ export function DiffPanel() {
           database: tgtDb,
           connectionOptions: connOptions,
           connectionValue: tgtId,
-          onConnectionChange: setTgtId,
+          onConnectionChange: handleTargetConnectionChange,
           databaseOptions: targetDatabaseOptions,
           databaseValue: tgtDb,
           databaseDisabled: !tgtId || tgtDbsLoading,

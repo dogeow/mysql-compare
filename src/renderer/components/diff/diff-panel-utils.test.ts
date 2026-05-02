@@ -5,14 +5,20 @@ import {
   DEFAULT_DIFF_RESULT_TAB,
   DEFAULT_TABLE_COMPARE_CONCURRENCY,
   DEFAULT_TABLE_SEARCH_QUERY,
+  MAX_DIFF_ENDPOINT_HISTORY,
+  createDiffEndpointHistoryKey,
+  filterDiffEndpointHistoryByConnections,
   filterChangedRowComparisons,
   filterComparisonEntries,
   getUpcomingRowDiffTables,
   getPreferredComparisonTable,
   getRowDiffNavigation,
+  hasCompleteDiffEndpointSelection,
   parseDiffPanelPreferences,
   parseTableCompareConcurrency,
-  prioritizeComparisonEntries
+  prioritizeComparisonEntries,
+  upsertDiffEndpointHistory,
+  type DiffEndpointHistoryItem
 } from './diff-panel-utils'
 
 describe('diff-panel-utils', () => {
@@ -289,7 +295,8 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: 'tables',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+      endpointHistory: []
     })
   })
 
@@ -306,7 +313,8 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: 'status',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+      endpointHistory: []
     })
   })
 
@@ -322,7 +330,8 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: 'tables',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+      endpointHistory: []
     })
   })
 
@@ -342,7 +351,8 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: 8,
       resultTab: 'data',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: 'users'
+      tableSearchQuery: 'users',
+      endpointHistory: []
     })
 
     expect(
@@ -354,7 +364,8 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: DEFAULT_DIFF_RESULT_TAB,
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+      endpointHistory: []
     })
 
     expect(parseDiffPanelPreferences('not-json')).toEqual({
@@ -362,7 +373,122 @@ describe('diff-panel-utils', () => {
       tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
       resultTab: DEFAULT_DIFF_RESULT_TAB,
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+      tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+      endpointHistory: []
     })
+  })
+
+  it('restores valid endpoint history entries from persisted preferences', () => {
+    const parsed = parseDiffPanelPreferences(
+      JSON.stringify({
+        endpointHistory: [
+          {
+            sourceConnectionId: 'source-a',
+            sourceDatabase: 'app',
+            targetConnectionId: 'target-a',
+            targetDatabase: 'app_shadow',
+            updatedAt: 10
+          },
+          {
+            sourceConnectionId: 'source-a',
+            sourceDatabase: 'app',
+            targetConnectionId: 'target-a',
+            targetDatabase: 'app_shadow',
+            updatedAt: 5
+          },
+          {
+            sourceConnectionId: 'missing-db',
+            sourceDatabase: '',
+            targetConnectionId: 'target-a',
+            targetDatabase: 'app_shadow',
+            updatedAt: 1
+          }
+        ]
+      })
+    )
+
+    expect(parsed.endpointHistory).toEqual([
+      {
+        sourceConnectionId: 'source-a',
+        sourceDatabase: 'app',
+        targetConnectionId: 'target-a',
+        targetDatabase: 'app_shadow',
+        updatedAt: 10
+      }
+    ])
+  })
+
+  it('adds endpoint history entries at the front and caps the stored list', () => {
+    const existingHistory: DiffEndpointHistoryItem[] = Array.from(
+      { length: MAX_DIFF_ENDPOINT_HISTORY },
+      (_, index) => ({
+        sourceConnectionId: `source-${index}`,
+        sourceDatabase: `source_db_${index}`,
+        targetConnectionId: `target-${index}`,
+        targetDatabase: `target_db_${index}`,
+        updatedAt: index
+      })
+    )
+
+    const nextHistory = upsertDiffEndpointHistory(
+      existingHistory,
+      {
+        sourceConnectionId: 'source-2',
+        sourceDatabase: 'source_db_2',
+        targetConnectionId: 'target-2',
+        targetDatabase: 'target_db_2'
+      },
+      100
+    )
+
+    expect(nextHistory).toHaveLength(MAX_DIFF_ENDPOINT_HISTORY)
+    expect(nextHistory[0]).toEqual({
+      sourceConnectionId: 'source-2',
+      sourceDatabase: 'source_db_2',
+      targetConnectionId: 'target-2',
+      targetDatabase: 'target_db_2',
+      updatedAt: 100
+    })
+    expect(
+      nextHistory.filter(
+        (item) => createDiffEndpointHistoryKey(item) === createDiffEndpointHistoryKey(nextHistory[0]!)
+      )
+    ).toHaveLength(1)
+  })
+
+  it('ignores incomplete endpoint history selections', () => {
+    const history: DiffEndpointHistoryItem[] = []
+    const selection = {
+      sourceConnectionId: 'source',
+      sourceDatabase: '',
+      targetConnectionId: 'target',
+      targetDatabase: 'target_db'
+    }
+
+    expect(hasCompleteDiffEndpointSelection(selection)).toBe(false)
+    expect(upsertDiffEndpointHistory(history, selection, 100)).toBe(history)
+  })
+
+  it('filters endpoint history to currently available connections', () => {
+    const history: DiffEndpointHistoryItem[] = [
+      {
+        sourceConnectionId: 'source',
+        sourceDatabase: 'app',
+        targetConnectionId: 'target',
+        targetDatabase: 'app_shadow',
+        updatedAt: 2
+      },
+      {
+        sourceConnectionId: 'source',
+        sourceDatabase: 'app',
+        targetConnectionId: 'deleted-target',
+        targetDatabase: 'app_shadow',
+        updatedAt: 1
+      }
+    ]
+
+    expect(filterDiffEndpointHistoryByConnections(history, new Set(['source', 'target']))).toEqual([
+      history[0]
+    ])
   })
 })

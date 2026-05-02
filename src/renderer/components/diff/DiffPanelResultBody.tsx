@@ -108,6 +108,9 @@ export function DiffPanelResultBody({
       <SchemaTabContent
         schemaDiffs={visibleSchemaDiffs}
         hasRowComparisonResults={hasRowComparisonResults}
+        tableSearchQuery={tableSearchQuery}
+        onSearchChange={onSearchChange}
+        onClearSearch={onClearSearch}
         onOpenCompare={onOpenCompare}
         onOpenSource={onOpenSource}
         onOpenTarget={onOpenTarget}
@@ -120,6 +123,9 @@ export function DiffPanelResultBody({
       <RowComparisonSection
         rowComparisons={diff.rowComparisons}
         showAll={showAllRowComparisons}
+        tableSearchQuery={tableSearchQuery}
+        onSearchChange={onSearchChange}
+        onClearSearch={onClearSearch}
         onToggleShowAll={onToggleShowAllRowComparisons}
         onOpenCompare={onOpenCompare}
         onOpenSource={onOpenSource}

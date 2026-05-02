@@ -1,5 +1,7 @@
-import { ChevronDown, ChevronRight } from 'lucide-react'
+import { ChevronDown, ChevronRight, Trash2 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
+import { Label } from '@renderer/components/ui/label'
+import { Select } from '@renderer/components/ui/select'
 import { useI18n } from '@renderer/i18n'
 import { EndpointCard } from './EndpointCard'
 
@@ -22,6 +24,13 @@ interface DiffPanelSetupSectionProps {
   expanded: boolean
   summary: string
   onToggle: () => void
+  history: {
+    options: SelectOption[]
+    value: string
+    disabled: boolean
+    onChange: (value: string) => void
+    onClear: () => void
+  }
   source: EndpointSelectionProps
   target: EndpointSelectionProps
 }
@@ -30,6 +39,7 @@ export function DiffPanelSetupSection({
   expanded,
   summary,
   onToggle,
+  history,
   source,
   target
 }: DiffPanelSetupSectionProps) {
@@ -53,6 +63,29 @@ export function DiffPanelSetupSection({
 
       {expanded && (
         <div className="border-t border-border/40 bg-card/10 px-4 py-3">
+          <div className="mb-3 flex items-end gap-2">
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label className="text-[11px] text-muted-foreground">{t('diff.history.label')}</Label>
+              <Select
+                options={history.options}
+                value={history.value}
+                disabled={history.disabled}
+                onChange={(event) => history.onChange(event.target.value)}
+              />
+            </div>
+            <Button
+              type="button"
+              size="icon"
+              variant="ghost"
+              className="h-9 w-9 shrink-0"
+              disabled={history.disabled}
+              title={t('diff.history.clear')}
+              aria-label={t('diff.history.clear')}
+              onClick={history.onClear}
+            >
+              <Trash2 className="h-4 w-4" />
+            </Button>
+          </div>
           <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <EndpointCard
               role="source"

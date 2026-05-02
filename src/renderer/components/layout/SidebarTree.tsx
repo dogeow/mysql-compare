@@ -10,13 +10,13 @@ import {
   Plus,
   RefreshCw,
   Search,
-  Server,
   Table as TableIcon,
   Trash2,
   X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
+import { EngineIcon } from '@renderer/components/icons/EngineIcon'
 import { cn } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
@@ -168,27 +168,17 @@ export function SidebarTree({
                 <button
                   onClick={() => onToggleConnection(connection)}
                   aria-expanded={Boolean(node?.expanded)}
-                  className="flex min-w-0 flex-1 items-start gap-2 text-left focus-visible:outline-none"
+                  className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
                 >
                   {node?.expanded ? (
-                    <ChevronDown className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
                   ) : (
-                    <ChevronRight className="mt-0.5 h-3.5 w-3.5 text-muted-foreground" />
+                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
                   )}
-                  <Server className="mt-0.5 h-3.5 w-3.5 text-sky-400" />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex min-w-0 items-center gap-1">
-                      <span className="truncate">{connection.name}</span>
-                      <span className="rounded border border-border px-1 text-[9px] uppercase text-muted-foreground">
-                        {connection.engine}
-                      </span>
-                      {connection.useSSH && <span className="text-[9px] text-amber-400">SSH</span>}
-                    </span>
-                    <span className="block truncate text-[10px] text-muted-foreground">
-                      {connection.host}:{connection.port}
-                      {connection.database ? ` / ${connection.database}` : ''}
-                      {node?.databases ? ` · ${node.databases.length} ${t('sidebar.databasesCount')}` : ''}
-                    </span>
+                  <EngineIcon engine={connection.engine} className="h-3.5 w-3.5" />
+                  <span className="flex min-w-0 flex-1 items-center gap-1">
+                    <span className="truncate">{connection.name}</span>
+                    {connection.useSSH && <span className="text-[9px] text-amber-400">SSH</span>}
                   </span>
                 </button>
                 <div className="flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">

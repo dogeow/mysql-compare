@@ -7,6 +7,7 @@ export const DEFAULT_DIFF_RESULT_TAB = 'status'
 export const DEFAULT_COMPARE_SETUP_EXPANDED = true
 export const DEFAULT_TABLE_SEARCH_QUERY = ''
 export const DIFF_PANEL_PREFERENCES_KEY = 'mysql-compare:diff-panel-preferences'
+export const MAX_DIFF_ENDPOINT_HISTORY = 8
 
 export type TableCompareStatus = 'queued' | 'comparing' | 'done' | 'error'
 export type TableStatusFilter = 'all' | 'comparing' | 'changed' | 'schema-changed' | 'row-changed'
@@ -18,6 +19,18 @@ export interface DiffPanelPreferences {
   resultTab: DiffResultTab
   setupExpanded: boolean
   tableSearchQuery: string
+  endpointHistory: DiffEndpointHistoryItem[]
+}
+
+export interface DiffEndpointSelection {
+  sourceConnectionId: string
+  sourceDatabase: string
+  targetConnectionId: string
+  targetDatabase: string
+}
+
+export interface DiffEndpointHistoryItem extends DiffEndpointSelection {
+  updatedAt: number
 }
 
 export interface TableCompareEntry {
@@ -243,10 +256,13 @@ export function filterComparisonEntries(
   searchQuery = ''
 ): TableCompareEntry[] {
   const filteredByStatus = applyStatusFilter(entries, filter)
-  const normalizedQuery = searchQuery.trim().toLowerCase()
-  if (!normalizedQuery) return filteredByStatus
+  return filteredByStatus.filter((entry) => matchesTableSearchQuery(entry.table, searchQuery))
+}
 
-  return filteredByStatus.filter((entry) => entry.table.toLowerCase().includes(normalizedQuery))
+export function matchesTableSearchQuery(table: string, searchQuery: string): boolean {
+  const normalizedQuery = searchQuery.trim().toLowerCase()
+  if (!normalizedQuery) return true
+  return table.toLowerCase().includes(normalizedQuery)
 }
 
 function applyStatusFilter(
@@ -319,6 +335,7 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
       sourceTablesExpanded?: unknown
       targetTablesExpanded?: unknown
       tableSearchQuery?: unknown
+      endpointHistory?: unknown
     }
     const legacyTablesVisible =
       parsed.sourceTablesExpanded === true || parsed.targetTablesExpanded === true
@@ -334,7 +351,8 @@ export function parseDiffPanelPreferences(raw: string | null | undefined): DiffP
           ? 'tables'
           : parseDiffResultTab(parsed.resultTab),
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-      tableSearchQuery: parseStringPreference(parsed.tableSearchQuery, DEFAULT_TABLE_SEARCH_QUERY)
+      tableSearchQuery: parseStringPreference(parsed.tableSearchQuery, DEFAULT_TABLE_SEARCH_QUERY),
+      endpointHistory: parseDiffEndpointHistory(parsed.endpointHistory)
     }
   } catch {
     return createDefaultDiffPanelPreferences()
@@ -347,8 +365,54 @@ function createDefaultDiffPanelPreferences(): DiffPanelPreferences {
     tableCompareConcurrency: DEFAULT_TABLE_COMPARE_CONCURRENCY,
     resultTab: DEFAULT_DIFF_RESULT_TAB,
     setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
-    tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY
+    tableSearchQuery: DEFAULT_TABLE_SEARCH_QUERY,
+    endpointHistory: []
   }
+}
+
+export function createDiffEndpointHistoryKey(selection: DiffEndpointSelection): string {
+  return [
+    selection.sourceConnectionId,
+    selection.sourceDatabase,
+    selection.targetConnectionId,
+    selection.targetDatabase
+  ].join('\u001f')
+}
+
+export function hasCompleteDiffEndpointSelection(
+  selection: DiffEndpointSelection
+): boolean {
+  return [
+    selection.sourceConnectionId,
+    selection.sourceDatabase,
+    selection.targetConnectionId,
+    selection.targetDatabase
+  ].every((value) => value.trim().length > 0)
+}
+
+export function upsertDiffEndpointHistory(
+  history: DiffEndpointHistoryItem[],
+  selection: DiffEndpointSelection,
+  updatedAt = Date.now()
+): DiffEndpointHistoryItem[] {
+  if (!hasCompleteDiffEndpointSelection(selection)) return history
+
+  const nextItem: DiffEndpointHistoryItem = { ...selection, updatedAt }
+  const nextKey = createDiffEndpointHistoryKey(nextItem)
+  return [
+    nextItem,
+    ...history.filter((item) => createDiffEndpointHistoryKey(item) !== nextKey)
+  ].slice(0, MAX_DIFF_ENDPOINT_HISTORY)
+}
+
+export function filterDiffEndpointHistoryByConnections(
+  history: DiffEndpointHistoryItem[],
+  connectionIds: ReadonlySet<string>
+): DiffEndpointHistoryItem[] {
+  return history.filter(
+    (item) =>
+      connectionIds.has(item.sourceConnectionId) && connectionIds.has(item.targetConnectionId)
+  )
 }
 
 export function hasSchemaOrPresenceDiff(tableDiff: TableDiff): boolean {
@@ -400,4 +464,34 @@ function isDiffResultTab(value: unknown): value is DiffResultTab {
 
 function parseStringPreference(value: unknown, fallback: string): string {
   return typeof value === 'string' ? value : fallback
+}
+
+function parseDiffEndpointHistory(value: unknown): DiffEndpointHistoryItem[] {
+  if (!Array.isArray(value)) return []
+
+  const seen = new Set<string>()
+  const history: DiffEndpointHistoryItem[] = []
+  for (const item of value) {
+    if (!item || typeof item !== 'object') continue
+    const candidate = item as Partial<Record<keyof DiffEndpointHistoryItem, unknown>>
+    const parsedItem: DiffEndpointHistoryItem = {
+      sourceConnectionId: parseStringPreference(candidate.sourceConnectionId, ''),
+      sourceDatabase: parseStringPreference(candidate.sourceDatabase, ''),
+      targetConnectionId: parseStringPreference(candidate.targetConnectionId, ''),
+      targetDatabase: parseStringPreference(candidate.targetDatabase, ''),
+      updatedAt: parseTimestamp(candidate.updatedAt)
+    }
+
+    if (!hasCompleteDiffEndpointSelection(parsedItem)) continue
+    const key = createDiffEndpointHistoryKey(parsedItem)
+    if (seen.has(key)) continue
+    seen.add(key)
+    history.push(parsedItem)
+    if (history.length >= MAX_DIFF_ENDPOINT_HISTORY) break
+  }
+  return history
+}
+
+function parseTimestamp(value: unknown): number {
+  return typeof value === 'number' && Number.isFinite(value) ? value : 0
 }

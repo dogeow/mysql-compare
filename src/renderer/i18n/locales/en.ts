@@ -205,6 +205,12 @@ export const en = {
       hide: 'Hide',
       show: 'Show',
     },
+    history: {
+      label: 'History',
+      placeholder: 'Select history',
+      empty: 'No history',
+      clear: 'Clear history',
+    },
     toast: {
       selectEndpoints: 'Select source/target connection and database',
       compatibilityMode:

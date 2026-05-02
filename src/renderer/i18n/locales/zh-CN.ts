@@ -207,6 +207,12 @@ export const zhCN: Dictionary = {
       hide: '收起',
       show: '展开',
     },
+    history: {
+      label: '历史记录',
+      placeholder: '选择历史记录',
+      empty: '暂无历史记录',
+      clear: '清空历史记录',
+    },
     toast: {
       selectEndpoints: '请选择源端/目标端连接和数据库',
       compatibilityMode: '当前会话正在使用兼容模式。重启应用后可恢复专用增量差异 IPC。',
