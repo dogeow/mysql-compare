@@ -1,11 +1,11 @@
 // 统一的 handler 包装：把 Service 错误转换为 IPCResult，避免抛异常跨进程。
-import { ipcMain } from 'electron'
+import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import type { IPCResult } from '../../shared/types'
 
-export function handle<T>(channel: string, fn: (payload: any) => Promise<T> | T): void {
-  ipcMain.handle(channel, async (_evt, payload): Promise<IPCResult<T>> => {
+export function handle<T>(channel: string, fn: (payload: any, event: IpcMainInvokeEvent) => Promise<T> | T): void {
+  ipcMain.handle(channel, async (evt, payload): Promise<IPCResult<T>> => {
     try {
-      const data = await fn(payload)
+      const data = await fn(payload, evt)
       return { ok: true, data }
     } catch (err) {
       console.error(`[ipc:${channel}]`, err)

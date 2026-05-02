@@ -19,9 +19,10 @@ interface Props {
   onOpenChange: (open: boolean) => void
   connection?: SafeConnection | null
   onSaved?: () => void
+  onDelete?: (connection: SafeConnection) => boolean | Promise<boolean>
 }
 
-export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Props) {
+export function ConnectionDialog({ open, onOpenChange, connection, onSaved, onDelete }: Props) {
   const { showToast } = useUIStore()
   const { t } = useI18n()
   const sshKeyInputRef = useRef<HTMLInputElement>(null)
@@ -133,6 +134,17 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
     }
   }
 
+  const onDeleteClick = async () => {
+    if (!connection || !onDelete) return
+    setBusy(true)
+    try {
+      const deleted = await onDelete(connection)
+      if (deleted) onOpenChange(false)
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <Dialog
       open={open}
@@ -141,14 +153,23 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved }: Pr
       description={t('connection.description')}
       className="max-w-2xl"
       footer={
-        <>
-          <Button variant="outline" onClick={onTest} disabled={busy}>
-            {t('common.test')}
-          </Button>
-          <Button onClick={onSave} disabled={busy}>
-            {t('common.save')}
-          </Button>
-        </>
+        <div className="flex w-full items-center justify-between gap-2">
+          <div>
+            {connection && onDelete && (
+              <Button variant="destructive" onClick={onDeleteClick} disabled={busy}>
+                {t('common.delete')}
+              </Button>
+            )}
+          </div>
+          <div className="flex items-center gap-2">
+            <Button variant="outline" onClick={onTest} disabled={busy}>
+              {t('common.test')}
+            </Button>
+            <Button onClick={onSave} disabled={busy}>
+              {t('common.save')}
+            </Button>
+          </div>
+        </div>
       }
     >
       <ConnectionDialogForm

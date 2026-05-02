@@ -87,6 +87,19 @@ export class ExportService {
       }
     }
 
+    if (backend === 'mysqldump-ssh') {
+      assertMySQLDumpSupported(driver.engine, sqlDialect)
+      await this.exportDatabaseWithMySQLDumpOverSSH(req, filePath)
+      return {
+        canceled: false,
+        filePath,
+        tablesExported: tables.length,
+        rowsExported: 0,
+        backend,
+        rowsCountAccurate: req.includeData === false
+      }
+    }
+
     const writer = await openExportWriter(filePath)
 
     const includeCreateTable = req.includeCreateTable !== false
@@ -192,7 +205,12 @@ export class ExportService {
     ) {
       throw new Error('Unsupported SQL export dialect')
     }
-    if (req.backend !== undefined && req.backend !== 'builtin' && req.backend !== 'mysqldump') {
+    if (
+      req.backend !== undefined &&
+      req.backend !== 'builtin' &&
+      req.backend !== 'mysqldump' &&
+      req.backend !== 'mysqldump-ssh'
+    ) {
       throw new Error('Unsupported database export backend')
     }
   }
@@ -205,11 +223,12 @@ export class ExportService {
     const localPort = conn.useSSH ? await sshService.ensureTunnel(conn) : undefined
     const host = conn.useSSH ? '127.0.0.1' : conn.host
     const port = localPort ?? conn.port
-    const args = buildMySQLDumpArgs(req, filePath, {
+    const args = buildMySQLDumpArgs(req, {
       host,
       port,
       username: conn.username,
-      database: req.database
+      database: req.database,
+      resultFile: filePath
     })
     const env = conn.password ? { ...process.env, MYSQL_PWD: conn.password } : process.env
 
@@ -237,9 +256,43 @@ export class ExportService {
           resolve()
           return
         }
-        reject(new Error(stderr.trim() || `mysqldump exited with code ${code ?? -1}`))
+        reject(new Error(formatMySQLDumpError(stderr.trim(), code)))
       })
     })
+  }
+
+  private async exportDatabaseWithMySQLDumpOverSSH(req: ExportDatabaseRequest, filePath: string): Promise<void> {
+    const conn = connectionStore.getFull(req.connectionId)
+    if (!conn) throw new Error(`Connection ${req.connectionId} not found`)
+    if (conn.engine !== 'mysql') throw new Error('mysqldump export only supports MySQL connections')
+    if (!conn.useSSH) throw new Error('Remote mysqldump export requires an SSH connection')
+
+    const args = buildMySQLDumpArgs(req, {
+      host: conn.host,
+      port: conn.port,
+      username: conn.username,
+      database: req.database
+    })
+    const command = buildRemoteMySQLDumpCommand(args, conn.password)
+    const fileHandle = await open(filePath, 'w')
+    let stderr = ''
+
+    try {
+      await sshService.execCommand(conn, {
+        command,
+        onStdout: async (chunk) => {
+          await fileHandle.appendFile(chunk)
+        },
+        onStderr: (chunk) => {
+          stderr += chunk
+        }
+      })
+    } catch (error) {
+      const message = stderr.trim() || (error as Error).message
+      throw new Error(formatMySQLDumpError(message, null, { source: 'ssh' }))
+    } finally {
+      await fileHandle.close()
+    }
   }
 
   private validate(req: ExportTableRequest): void {
@@ -408,8 +461,7 @@ function assertMySQLDumpSupported(sourceEngine: DbEngine, sqlDialect: DbEngine):
 
 function buildMySQLDumpArgs(
   req: ExportDatabaseRequest,
-  filePath: string,
-  options: { host: string; port: number; username: string; database: string }
+  options: { host: string; port: number; username: string; database: string; resultFile?: string }
 ): string[] {
   const includeCreateTable = req.includeCreateTable !== false
   const includeData = req.includeData !== false
@@ -425,8 +477,7 @@ function buildMySQLDumpArgs(
     '--skip-dump-date',
     '--skip-triggers',
     '--hex-blob',
-    '--complete-insert',
-    `--result-file=${filePath}`
+    '--complete-insert'
   ]
 
   if (!includeCreateTable) args.push('--no-create-info')
@@ -438,7 +489,46 @@ function buildMySQLDumpArgs(
     args.push(options.database)
   }
 
+  if (options.resultFile) args.push(`--result-file=${options.resultFile}`)
+
   return args
+}
+
+function buildRemoteMySQLDumpCommand(args: string[], password?: string): string {
+  const envPrefix = password ? `MYSQL_PWD=${shellEscape(password)} ` : ''
+  return `${envPrefix}exec mysqldump ${args.map(shellEscape).join(' ')}`
+}
+
+function shellEscape(value: string): string {
+  if (value.length === 0) return "''"
+  return `'${value.replace(/'/g, `'"'"'`)}'`
+}
+
+function formatMySQLDumpError(
+  stderr: string,
+  exitCode: number | null,
+  options: { source?: 'local' | 'ssh' } = {}
+): string {
+  const source = options.source ?? 'local'
+  const toolName = source === 'ssh' ? 'Remote mysqldump' : 'mysqldump'
+
+  if (!stderr) return `${toolName} exited with code ${exitCode ?? -1}`
+
+  if (source === 'ssh' && /(?:^|\s)mysqldump:\s+not found|command not found/i.test(stderr)) {
+    return `Remote mysqldump failed: mysqldump is not installed or not in PATH on the SSH server. Original error: ${stderr}`
+  }
+
+  // MySQL 9 client no longer ships mysql_native_password plugin, causing auth error 2059.
+  if (/got error:\s*2059/i.test(stderr) && /authentication plugin\s+'mysql_native_password'\s+cannot be loaded/i.test(stderr)) {
+    return [
+      `${toolName} failed: mysql_native_password plugin cannot be loaded (error 2059).`,
+      `This usually happens when using MySQL 9 client tools ${source === 'ssh' ? 'on the SSH server' : 'on this machine'} against a mysql_native_password account.`,
+      'Fix options: 1) ALTER USER ... IDENTIFIED WITH caching_sha2_password; 2) install/use mysql-client 8.4 mysqldump; 3) switch export backend to Built-in exporter.',
+      `Original error: ${stderr}`
+    ].join(' ')
+  }
+
+  return stderr
 }
 
 function getTargetDialect(sourceDriver: DbDriver, sqlDialect: DbEngine) {

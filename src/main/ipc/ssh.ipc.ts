@@ -6,6 +6,10 @@ import type {
   SSHDownloadFileRequest,
   SSHListFilesRequest,
   SSHMoveFileRequest,
+  SSHTerminalCloseRequest,
+  SSHTerminalCreateRequest,
+  SSHTerminalResizeRequest,
+  SSHTerminalWriteRequest,
   SSHReadFileRequest,
   SSHUploadDirectoryRequest,
   SSHUploadEntriesRequest,
@@ -13,6 +17,7 @@ import type {
   SSHWriteFileRequest,
 } from '../../shared/types'
 import { sshFileService } from '../services/ssh-file-service'
+import { sshTerminalService } from '../services/ssh-terminal-service'
 import { handle } from './_wrap'
 
 export function registerSSHIPC(): void {
@@ -27,4 +32,13 @@ export function registerSSHIPC(): void {
   handle(IPC.SSHCreateDirectory, (payload: SSHCreateDirectoryRequest) => sshFileService.createDirectory(payload))
   handle(IPC.SSHDeleteFile, (payload: SSHDeleteFileRequest) => sshFileService.deleteFile(payload))
   handle(IPC.SSHMoveFile, (payload: SSHMoveFileRequest) => sshFileService.moveFile(payload))
+  handle(IPC.SSHTerminalCreate, (payload: SSHTerminalCreateRequest, event) =>
+    sshTerminalService.createSession(payload, {
+      onData: (terminalEvent) => event.sender.send(IPC.SSHTerminalData, terminalEvent),
+      onExit: (terminalEvent) => event.sender.send(IPC.SSHTerminalExit, terminalEvent)
+    })
+  )
+  handle(IPC.SSHTerminalWrite, (payload: SSHTerminalWriteRequest) => sshTerminalService.write(payload))
+  handle(IPC.SSHTerminalResize, (payload: SSHTerminalResizeRequest) => sshTerminalService.resize(payload))
+  handle(IPC.SSHTerminalClose, (payload: SSHTerminalCloseRequest) => sshTerminalService.close(payload))
 }

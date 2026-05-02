@@ -28,6 +28,13 @@ import type {
   SSHListFilesRequest,
   SSHListFilesResult,
   SSHMoveFileRequest,
+  SSHTerminalCloseRequest,
+  SSHTerminalCreateRequest,
+  SSHTerminalCreateResult,
+  SSHTerminalDataEvent,
+  SSHTerminalExitEvent,
+  SSHTerminalResizeRequest,
+  SSHTerminalWriteRequest,
   SSHReadFileRequest,
   SSHReadFileResult,
   SSHUploadDirectoryRequest,
@@ -88,7 +95,21 @@ const api = {
     writeFile: (req: SSHWriteFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHWriteFile, req),
     createDirectory: (req: SSHCreateDirectoryRequest) => invoke<SSHFileOperationResult>(IPC.SSHCreateDirectory, req),
     deleteFile: (req: SSHDeleteFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHDeleteFile, req),
-    moveFile: (req: SSHMoveFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHMoveFile, req)
+    moveFile: (req: SSHMoveFileRequest) => invoke<SSHFileOperationResult>(IPC.SSHMoveFile, req),
+    createTerminal: (req: SSHTerminalCreateRequest) => invoke<SSHTerminalCreateResult>(IPC.SSHTerminalCreate, req),
+    writeTerminal: (req: SSHTerminalWriteRequest) => invoke<void>(IPC.SSHTerminalWrite, req),
+    resizeTerminal: (req: SSHTerminalResizeRequest) => invoke<void>(IPC.SSHTerminalResize, req),
+    closeTerminal: (req: SSHTerminalCloseRequest) => invoke<void>(IPC.SSHTerminalClose, req),
+    onTerminalData: (cb: (event: SSHTerminalDataEvent) => void) => {
+      const listener = (_: IpcRendererEvent, event: SSHTerminalDataEvent) => cb(event)
+      ipcRenderer.on(IPC.SSHTerminalData, listener)
+      return () => ipcRenderer.off(IPC.SSHTerminalData, listener)
+    },
+    onTerminalExit: (cb: (event: SSHTerminalExitEvent) => void) => {
+      const listener = (_: IpcRendererEvent, event: SSHTerminalExitEvent) => cb(event)
+      ipcRenderer.on(IPC.SSHTerminalExit, listener)
+      return () => ipcRenderer.off(IPC.SSHTerminalExit, listener)
+    }
   },
   system: {
     getPathForFile: (file: File) => webUtils.getPathForFile(file)

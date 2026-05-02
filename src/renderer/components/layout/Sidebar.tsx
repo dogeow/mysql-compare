@@ -1,5 +1,5 @@
 // 左侧侧边栏：连接列表、连接 → 数据库 → 表的树
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { api, unwrap } from '@renderer/lib/api'
@@ -190,9 +190,11 @@ export function Sidebar() {
     })
   }
 
-  const filtered = connections.filter((c) =>
-    !keyword || c.name.toLowerCase().includes(keyword.toLowerCase())
-  )
+  const filtered = useMemo(() => {
+    const query = keyword.trim().toLowerCase()
+    if (!query) return connections
+    return connections.filter((connection) => connection.name.toLowerCase().includes(query))
+  }, [connections, keyword])
 
   const isSelectedTable = (connectionId: string, database: string, table: string) =>
     rightView.kind === 'table' &&
@@ -283,6 +285,10 @@ export function Sidebar() {
 
   const openSSHFiles = (conn: SafeConnection) => {
     setRightView({ kind: 'ssh-files', connectionId: conn.id, connectionName: conn.name })
+  }
+
+  const openSSHTerminal = (conn: SafeConnection) => {
+    setRightView({ kind: 'ssh-terminal', connectionId: conn.id, connectionName: conn.name })
   }
 
   const openTableMenu = (
@@ -468,10 +474,16 @@ export function Sidebar() {
     }
   }
 
-  const onDelete = async (conn: SafeConnection) => {
-    if (!confirm(t('sidebar.confirm.deleteConnection', { name: conn.name }))) return
-    await remove(conn.id)
-    showToast(t('sidebar.toast.connectionDeleted'), 'success')
+  const onDelete = async (conn: SafeConnection): Promise<boolean> => {
+    if (!confirm(t('sidebar.confirm.deleteConnection', { name: conn.name }))) return false
+    try {
+      await remove(conn.id)
+      showToast(t('sidebar.toast.connectionDeleted'), 'success')
+      return true
+    } catch (err) {
+      showToast((err as Error).message, 'error')
+      return false
+    }
   }
 
   const startResize = (event: React.MouseEvent<HTMLDivElement>) => {
@@ -527,8 +539,8 @@ export function Sidebar() {
           isSelectedTable={isSelectedTable}
           onToggleConnection={toggleConnection}
           onEditConnection={setEditing}
-          onDeleteConnection={onDelete}
           onOpenSSHFiles={openSSHFiles}
+          onOpenSSHTerminal={openSSHTerminal}
           onToggleDatabase={toggleDatabase}
           onOpenSQLConsole={openSQLConsole}
           onExportDatabase={openExportDatabaseDialog}
@@ -563,6 +575,7 @@ export function Sidebar() {
           }
         }}
         onConnectionSaved={refresh}
+        onDeleteConnection={onDelete}
         tableMenu={tableMenu}
         onCloseTableMenu={() => setTableMenu(null)}
         databaseMenu={databaseMenu}

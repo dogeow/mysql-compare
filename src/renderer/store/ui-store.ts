@@ -27,6 +27,7 @@ export type RightView =
       request: ExportDatabaseRequest
     }
   | { kind: 'ssh-files'; connectionId: string; connectionName: string }
+  | { kind: 'ssh-terminal'; connectionId: string; connectionName: string }
   | { kind: 'ssh-editor'; connectionId: string; connectionName: string; path: string }
   | { kind: 'diff' }
 
@@ -100,6 +101,7 @@ function getTabId(view: WorkspaceView): string {
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
   if (view.kind === 'database-export') return `database-export:${view.exportTaskId}`
   if (view.kind === 'ssh-files') return `ssh-files:${view.connectionId}`
+  if (view.kind === 'ssh-terminal') return `ssh-terminal:${view.connectionId}`
   if (view.kind === 'ssh-editor') return `ssh-editor:${view.connectionId}:${view.path}`
   if (view.kind === 'table-compare') {
     return `table-compare:${view.compareSessionId}`
@@ -124,6 +126,7 @@ function getTabTitle(view: WorkspaceView): string {
       : `Export · ${view.request.database}`
   }
   if (view.kind === 'ssh-files') return `SSH · ${view.connectionName}`
+  if (view.kind === 'ssh-terminal') return `Terminal · ${view.connectionName}`
   if (view.kind === 'ssh-editor') return view.path.split('/').filter(Boolean).pop() || view.path
   if (view.kind === 'table-compare') return `Compare · ${view.table}`
   return view.table
@@ -200,6 +203,7 @@ export const useUIStore = create<UIState>((set) => ({
     }),
   setActiveTab: (tabId) =>
     set((state) => {
+      if (state.activeTabId === tabId) return state
       const tab = state.workspaceTabs.find((item) => item.id === tabId)
       if (!tab) return state
       return { ...state, activeTabId: tab.id, rightView: tab.view }

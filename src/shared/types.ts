@@ -153,7 +153,7 @@ export type ExportScope = 'all' | 'filtered' | 'page' | 'selected'
 
 export type ExportSqlDialect = 'source' | DbEngine
 
-export type ExportDatabaseBackend = 'builtin' | 'mysqldump'
+export type ExportDatabaseBackend = 'builtin' | 'mysqldump' | 'mysqldump-ssh'
 
 export type ImportFormat = ExportFormat
 
@@ -227,6 +227,41 @@ export interface SSHFileEntry {
   size: number
   modifiedAt: number | null
   permissions: string
+}
+
+export interface SSHTerminalCreateRequest {
+  connectionId: string
+  cols?: number
+  rows?: number
+}
+
+export interface SSHTerminalCreateResult {
+  sessionId: string
+}
+
+export interface SSHTerminalWriteRequest {
+  sessionId: string
+  data: string
+}
+
+export interface SSHTerminalResizeRequest {
+  sessionId: string
+  cols: number
+  rows: number
+}
+
+export interface SSHTerminalCloseRequest {
+  sessionId: string
+}
+
+export interface SSHTerminalDataEvent {
+  sessionId: string
+  data: string
+}
+
+export interface SSHTerminalExitEvent {
+  sessionId: string
+  message?: string
 }
 
 export interface SSHListFilesRequest {

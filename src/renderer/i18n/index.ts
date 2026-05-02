@@ -1,3 +1,4 @@
+import { useCallback } from 'react'
 import { create } from 'zustand'
 import { en, type Dictionary } from './locales/en'
 import { zhCN } from './locales/zh-CN'
@@ -74,10 +75,10 @@ export type Translator = (key: string, vars?: Record<string, string | number>) =
 export function useTranslator(): Translator {
   const locale = useI18nStore((s) => s.locale)
   const dict = dictionaries[locale] ?? en
-  return (key, vars) => {
+  return useCallback((key, vars) => {
     const raw = resolvePath(dict, key) ?? resolvePath(en, key) ?? key
     return interpolate(raw, vars)
-  }
+  }, [dict])
 }
 
 export function useI18n(): {

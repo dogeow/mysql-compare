@@ -37,6 +37,12 @@ export const IPC = {
   SSHCreateDirectory: 'ssh:createDirectory',
   SSHDeleteFile: 'ssh:deleteFile',
   SSHMoveFile: 'ssh:moveFile',
+  SSHTerminalCreate: 'ssh-terminal:create',
+  SSHTerminalWrite: 'ssh-terminal:write',
+  SSHTerminalResize: 'ssh-terminal:resize',
+  SSHTerminalClose: 'ssh-terminal:close',
+  SSHTerminalData: 'ssh-terminal:data',
+  SSHTerminalExit: 'ssh-terminal:exit',
 
   // Diff & Sync
   DiffDatabases: 'diff:databases',

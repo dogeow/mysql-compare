@@ -144,7 +144,7 @@ export function DatabaseExportTaskView({ taskId, connectionName, request }: Data
 }
 
 function getExportMessage(result: ExportDatabaseResult, t: ReturnType<typeof useI18n>['t']): string {
-  return result.backend === 'mysqldump' && result.rowsCountAccurate === false
+  return isMySQLDumpBackend(result.backend) && result.rowsCountAccurate === false
     ? t('databaseExportDialog.exportedFast', { tables: result.tablesExported })
     : t('databaseExportDialog.exported', {
         tables: result.tablesExported,
@@ -157,9 +157,14 @@ function formatDialect(value: ExportDatabaseRequest['sqlDialect'], t: ReturnType
 }
 
 function formatBackend(value: ExportDatabaseRequest['backend'], t: ReturnType<typeof useI18n>['t']): string {
+  if (value === 'mysqldump-ssh') return t('databaseExportDialog.backendMysqldumpSsh')
   return value === 'mysqldump'
     ? t('databaseExportDialog.backendMysqldump')
     : t('databaseExportDialog.backendBuiltin')
+}
+
+function isMySQLDumpBackend(value: ExportDatabaseResult['backend']): boolean {
+  return value === 'mysqldump' || value === 'mysqldump-ssh'
 }
 
 function statusClassName(status: ExportTaskStatus): string {

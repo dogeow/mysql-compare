@@ -244,16 +244,9 @@ export function DiffPanel() {
   const currentEndpointHistoryKey = hasCompleteDiffEndpointSelection(currentEndpointSelection)
     ? createDiffEndpointHistoryKey(currentEndpointSelection)
     : ''
-  const endpointHistoryOptions = useMemo(
-    () => [
-      {
-        value: '',
-        label:
-          validEndpointHistory.length > 0
-            ? t('diff.history.placeholder')
-            : t('diff.history.empty')
-      },
-      ...validEndpointHistory.map((item) => {
+  const endpointHistoryItems = useMemo(
+    () =>
+      validEndpointHistory.map((item) => {
         const sourceName =
           connectionNameById.get(item.sourceConnectionId) ?? item.sourceConnectionId
         const targetName =
@@ -262,11 +255,10 @@ export function DiffPanel() {
           value: createDiffEndpointHistoryKey(item),
           label: `${sourceName} / ${item.sourceDatabase} -> ${targetName} / ${item.targetDatabase}`
         }
-      })
-    ],
-    [connectionNameById, t, validEndpointHistory]
+      }),
+    [connectionNameById, validEndpointHistory]
   )
-  const selectedEndpointHistoryValue = endpointHistoryOptions.some(
+  const selectedEndpointHistoryValue = endpointHistoryItems.some(
     (option) => option.value === currentEndpointHistoryKey
   )
     ? currentEndpointHistoryKey
@@ -294,8 +286,13 @@ export function DiffPanel() {
     setTgtDb(historyItem.targetDatabase)
   }
 
-  const handleClearEndpointHistory = () => {
-    setPreferences((current) => ({ ...current, endpointHistory: [] }))
+  const handleDeleteEndpointHistory = (value: string) => {
+    setPreferences((current) => ({
+      ...current,
+      endpointHistory: current.endpointHistory.filter(
+        (item) => createDiffEndpointHistoryKey(item) !== value
+      )
+    }))
   }
 
   useEffect(() => {
@@ -391,11 +388,10 @@ export function DiffPanel() {
           setPreferences((current) => ({ ...current, setupExpanded: !current.setupExpanded }))
         }
         history={{
-          options: endpointHistoryOptions,
-          value: selectedEndpointHistoryValue,
-          disabled: validEndpointHistory.length === 0,
-          onChange: handleEndpointHistoryChange,
-          onClear: handleClearEndpointHistory
+          items: endpointHistoryItems,
+          activeValue: selectedEndpointHistoryValue,
+          onSelect: handleEndpointHistoryChange,
+          onDelete: handleDeleteEndpointHistory
         }}
         source={{
           connectionName: selectedSourceConnection?.name,

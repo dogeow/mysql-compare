@@ -2,11 +2,13 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import type { ExportDatabaseRequest, ExportTableRequest, TableSchema } from '../../shared/types'
 import type { DbDriver } from './drivers/types'
 
-const { fileHandle, open, showSaveDialog, getDriver, getTableSchema, getFull, ensureTunnel, spawn } = vi.hoisted(() => {
+const { fileHandle, open, showSaveDialog, getDriver, getTableSchema, getFull, ensureTunnel, execCommand, spawn } = vi.hoisted(() => {
   const fileHandle = {
     appendFile: vi.fn(async () => undefined),
     close: vi.fn(async () => undefined)
   }
+
+  const execCommand = vi.fn(async (..._args: unknown[]) => undefined)
 
   const spawn = vi.fn(() => {
     const child = {
@@ -29,6 +31,7 @@ const { fileHandle, open, showSaveDialog, getDriver, getTableSchema, getFull, en
     getTableSchema: vi.fn(),
     getFull: vi.fn(),
     ensureTunnel: vi.fn(async () => 33061),
+    execCommand,
     spawn
   }
 })
@@ -71,7 +74,8 @@ vi.mock('../store/connection-store', () => ({
 
 vi.mock('./ssh-service', () => ({
   sshService: {
-    ensureTunnel
+    ensureTunnel,
+    execCommand
   }
 }))
 
@@ -85,11 +89,13 @@ describe('ExportService', () => {
     fileHandle.appendFile.mockClear()
     fileHandle.close.mockClear()
     spawn.mockClear()
+    execCommand.mockReset()
     showSaveDialog.mockReset()
     getDriver.mockReset()
     getTableSchema.mockReset()
     getFull.mockReset()
     ensureTunnel.mockReset()
+    execCommand.mockResolvedValue(undefined)
     showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/users.sql' })
   })
 
@@ -291,6 +297,104 @@ describe('ExportService', () => {
       })
     )
     expect(open).not.toHaveBeenCalled()
+  })
+
+  it('exports a MySQL database with remote mysqldump over SSH when requested', async () => {
+    const { driver } = createMySQLDriver({ tables: ['users'], streamBatches: [] })
+
+    getDriver.mockResolvedValue(driver)
+    getFull.mockReturnValue({
+      id: 'mysql-conn',
+      engine: 'mysql',
+      name: 'Primary',
+      host: 'db.internal',
+      port: 3306,
+      username: 'root',
+      password: 'secret',
+      useSSH: true,
+      sshHost: 'ssh.internal',
+      sshPort: 22,
+      sshUsername: 'deployer',
+      sshPassword: 'ssh-secret',
+      createdAt: 1,
+      updatedAt: 1
+    })
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/shop.sql' })
+    execCommand.mockImplementationOnce(async (...args: unknown[]) => {
+      const [, options] = args as [unknown, { command: string; onStdout?: (chunk: Buffer) => Promise<void> | void }]
+
+      expect(options.command).toContain("MYSQL_PWD='secret' exec mysqldump")
+      expect(options.command).toContain("'--host=db.internal'")
+      expect(options.command).toContain("'--port=3306'")
+      expect(options.command).toContain("'--user=root'")
+      expect(options.command).toContain("'shop'")
+      await options.onStdout?.(Buffer.from('CREATE DATABASE IF NOT EXISTS `shop`;\n'))
+      await options.onStdout?.(Buffer.from('CREATE TABLE `shop`.`users` (`id` int);\n'))
+    })
+
+    const result = await exportService.exportDatabase(
+      createDatabaseExportRequest({ backend: 'mysqldump-ssh', sqlDialect: 'mysql' })
+    )
+
+    expect(result).toEqual({
+      canceled: false,
+      filePath: '/tmp/shop.sql',
+      tablesExported: 1,
+      rowsExported: 0,
+      backend: 'mysqldump-ssh',
+      rowsCountAccurate: false
+    })
+    expect(execCommand).toHaveBeenCalledTimes(1)
+    expect(ensureTunnel).not.toHaveBeenCalled()
+    expect(open).toHaveBeenCalledWith('/tmp/shop.sql', 'w')
+    expect(fileHandle.appendFile).toHaveBeenNthCalledWith(1, Buffer.from('CREATE DATABASE IF NOT EXISTS `shop`;\n'))
+    expect(fileHandle.appendFile).toHaveBeenNthCalledWith(2, Buffer.from('CREATE TABLE `shop`.`users` (`id` int);\n'))
+  })
+
+  it('returns actionable guidance when mysqldump cannot load mysql_native_password plugin', async () => {
+    const { driver } = createMySQLDriver({ tables: ['users'], streamBatches: [] })
+
+    getDriver.mockResolvedValue(driver)
+    getFull.mockReturnValue({
+      id: 'mysql-conn',
+      engine: 'mysql',
+      name: 'Primary',
+      host: 'db.internal',
+      port: 3306,
+      username: 'root',
+      password: 'secret',
+      useSSH: false,
+      createdAt: 1,
+      updatedAt: 1
+    })
+    showSaveDialog.mockResolvedValue({ canceled: false, filePath: '/tmp/shop.sql' })
+
+    spawn.mockImplementationOnce(() => {
+      const listeners: Record<string, ((chunk: Buffer) => void) | undefined> = {}
+      const child = {
+        stderr: {
+          on: vi.fn((event: string, cb: (chunk: Buffer) => void) => {
+            if (event === 'data') listeners.data = cb
+          })
+        },
+        once: vi.fn((event: string, cb: (...args: unknown[]) => void) => {
+          if (event === 'close') {
+            listeners.data?.(
+              Buffer.from(
+                "mysqldump: Got error: 2059: Authentication plugin 'mysql_native_password' cannot be loaded"
+              )
+            )
+            cb(1)
+          }
+          return child
+        })
+      }
+      return child
+    })
+
+    await expect(
+      exportService.exportDatabase(createDatabaseExportRequest({ backend: 'mysqldump', sqlDialect: 'mysql' }))
+    ).rejects.toThrow(/Fix options: 1\) ALTER USER/i)
   })
 })
 

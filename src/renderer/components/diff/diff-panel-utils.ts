@@ -1,7 +1,7 @@
 import type { DatabaseDiff, TableDiff, TableRowComparison } from '../../../shared/types'
 
-export const TABLE_COMPARE_CONCURRENCY_OPTIONS = [1, 2, 3, 5, 8] as const
-export const DEFAULT_TABLE_COMPARE_CONCURRENCY = 3
+export const TABLE_COMPARE_CONCURRENCY_OPTIONS = [1, 5, 10, 20, 50] as const
+export const DEFAULT_TABLE_COMPARE_CONCURRENCY = 5
 export const DEFAULT_TABLE_STATUS_FILTER = 'all'
 export const DEFAULT_DIFF_RESULT_TAB = 'status'
 export const DEFAULT_COMPARE_SETUP_EXPANDED = true

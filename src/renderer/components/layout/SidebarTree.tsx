@@ -5,21 +5,18 @@ import {
   Database,
   Download,
   FileCode2,
-  Folder,
-  Pencil,
   Plus,
   RefreshCw,
   Search,
   Table as TableIcon,
-  Trash2,
   X
 } from 'lucide-react'
 import { Button } from '@renderer/components/ui/button'
 import { Input } from '@renderer/components/ui/input'
-import { EngineIcon } from '@renderer/components/icons/EngineIcon'
 import { cn } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
+import { SidebarConnectionRow } from './SidebarConnectionRow'
 import type {
   DatabaseRowRefEntry,
   NodeState,
@@ -39,8 +36,8 @@ interface SidebarTreeProps {
   isSelectedTable: (connectionId: string, database: string, table: string) => boolean
   onToggleConnection: (connection: SafeConnection) => void | Promise<void>
   onEditConnection: (connection: SafeConnection) => void
-  onDeleteConnection: (connection: SafeConnection) => void | Promise<void>
   onOpenSSHFiles: (connection: SafeConnection) => void
+  onOpenSSHTerminal: (connection: SafeConnection) => void | Promise<void>
   onToggleDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
   onOpenSQLConsole: (connection: SafeConnection, database: string) => void
   onExportDatabase: (connection: SafeConnection, database: string) => void
@@ -73,8 +70,8 @@ export function SidebarTree({
   isSelectedTable,
   onToggleConnection,
   onEditConnection,
-  onDeleteConnection,
   onOpenSSHFiles,
+  onOpenSSHTerminal,
   onToggleDatabase,
   onOpenSQLConsole,
   onExportDatabase,
@@ -164,52 +161,14 @@ export function SidebarTree({
 
               return (
                 <div key={connection.id}>
-              <div className="group mx-1 flex cursor-pointer items-center rounded-md px-2 py-1 hover:bg-accent focus-within:bg-accent/70">
-                <button
-                  onClick={() => onToggleConnection(connection)}
-                  aria-expanded={Boolean(node?.expanded)}
-                  className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none"
-                >
-                  {node?.expanded ? (
-                    <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-                  ) : (
-                    <ChevronRight className="h-3.5 w-3.5 text-muted-foreground" />
-                  )}
-                  <EngineIcon engine={connection.engine} className="h-3.5 w-3.5" />
-                  <span className="flex min-w-0 flex-1 items-center gap-1">
-                    <span className="truncate">{connection.name}</span>
-                    {connection.useSSH && <span className="text-[9px] text-amber-400">SSH</span>}
-                  </span>
-                </button>
-                <div className="flex opacity-0 group-hover:opacity-100 group-focus-within:opacity-100">
-                  {connection.useSSH && (
-                    <button
-                      onClick={(event) => {
-                        event.stopPropagation()
-                        onOpenSSHFiles(connection)
-                      }}
-                      className="p-1 text-muted-foreground hover:text-foreground"
-                      title={t('sidebar.openSshFiles')}
-                    >
-                      <Folder className="h-3 w-3" />
-                    </button>
-                  )}
-                  <button
-                    onClick={() => onEditConnection(connection)}
-                    className="p-1 text-muted-foreground hover:text-foreground"
-                    title={t('common.edit')}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </button>
-                  <button
-                    onClick={() => onDeleteConnection(connection)}
-                    className="p-1 text-muted-foreground hover:text-destructive"
-                    title={t('common.delete')}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </button>
-                </div>
-              </div>
+              <SidebarConnectionRow
+                connection={connection}
+                expanded={Boolean(node?.expanded)}
+                onToggle={onToggleConnection}
+                onEdit={onEditConnection}
+                onOpenSSHFiles={onOpenSSHFiles}
+                onOpenSSHTerminal={onOpenSSHTerminal}
+              />
 
               {node?.expanded && (
                 <div className="pl-4">

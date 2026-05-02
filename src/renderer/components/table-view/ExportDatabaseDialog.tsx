@@ -43,14 +43,23 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
   )
 
   const backendOptions = useMemo(
-    () => [
-      { value: 'builtin', label: t('databaseExportDialog.backendBuiltin') } as const,
-      { value: 'mysqldump', label: t('databaseExportDialog.backendMysqldump') } as const
-    ],
-    [t]
+    () => {
+      const options: Array<{ value: ExportDatabaseBackend; label: string }> = [
+        { value: 'builtin', label: t('databaseExportDialog.backendBuiltin') } as const,
+        { value: 'mysqldump', label: t('databaseExportDialog.backendMysqldump') } as const
+      ]
+
+      if (connection?.useSSH) {
+        options.push({ value: 'mysqldump-ssh', label: t('databaseExportDialog.backendMysqldumpSsh') } as const)
+      }
+
+      return options
+    },
+    [connection?.useSSH, t]
   )
 
   const canUseMySQLDump = sourceEngine === 'mysql' && sqlDialect === 'mysql'
+  const canUseRemoteMySQLDump = canUseMySQLDump && connection?.useSSH === true
 
   useEffect(() => {
     if (!open) return
@@ -61,10 +70,15 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
   }, [connectionId, database, open, sourceEngine])
 
   useEffect(() => {
-    if (!canUseMySQLDump && backend === 'mysqldump') {
+    if (!canUseMySQLDump && (backend === 'mysqldump' || backend === 'mysqldump-ssh')) {
+      setBackend('builtin')
+      return
+    }
+
+    if (!canUseRemoteMySQLDump && backend === 'mysqldump-ssh') {
       setBackend('builtin')
     }
-  }, [backend, canUseMySQLDump])
+  }, [backend, canUseMySQLDump, canUseRemoteMySQLDump])
 
   const canExport = includeCreateTable || includeData
 
@@ -137,7 +151,11 @@ export function ExportDatabaseDialog({ open, onOpenChange, connectionId, databas
               onChange={(event) => setBackend(event.target.value as ExportDatabaseBackend)}
               options={backendOptions}
             />
-            <p className="mt-1 text-xs text-muted-foreground">{t('databaseExportDialog.backendHint')}</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              {backend === 'mysqldump-ssh'
+                ? t('databaseExportDialog.backendHintSsh')
+                : t('databaseExportDialog.backendHintLocal')}
+            </p>
           </div>
         )}
 

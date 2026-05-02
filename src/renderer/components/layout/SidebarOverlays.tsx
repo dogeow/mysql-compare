@@ -25,6 +25,7 @@ interface SidebarOverlaysProps {
   editing: SafeConnection | null
   onConnectionDialogOpenChange: (open: boolean) => void
   onConnectionSaved: () => void
+  onDeleteConnection: (connection: SafeConnection) => boolean | Promise<boolean>
   tableMenu: TableMenuState | null
   onCloseTableMenu: () => void
   databaseMenu: DatabaseMenuState | null
@@ -62,6 +63,7 @@ export function SidebarOverlays({
   editing,
   onConnectionDialogOpenChange,
   onConnectionSaved,
+  onDeleteConnection,
   tableMenu,
   onCloseTableMenu,
   databaseMenu,
@@ -102,6 +104,7 @@ export function SidebarOverlays({
           connection={editing}
           onOpenChange={onConnectionDialogOpenChange}
           onSaved={onConnectionSaved}
+          onDelete={onDeleteConnection}
         />
       )}
 

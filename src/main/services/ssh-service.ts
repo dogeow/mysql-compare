@@ -10,6 +10,12 @@ interface ActiveTunnel {
   localPort: number
 }
 
+interface ExecCommandOptions {
+  command: string
+  onStdout?: (chunk: Buffer) => void | Promise<void>
+  onStderr?: (chunk: string) => void | Promise<void>
+}
+
 class SSHService {
   private tunnels = new Map<string, ActiveTunnel>()
   private pendingTunnels = new Map<string, Promise<number>>()
@@ -44,24 +50,23 @@ class SSHService {
     }
   }
 
-  private async createTunnel(conn: ConnectionConfig): Promise<number> {
-    const sshConfig: ConnectConfig = {
-      host: conn.sshHost,
-      port: conn.sshPort || 22,
-      username: conn.sshUsername,
-      readyTimeout: 15000,
-      keepaliveInterval: 30000
-    }
-    if (conn.sshPrivateKey) {
-      sshConfig.privateKey = conn.sshPrivateKey
-      if (conn.sshPassphrase) sshConfig.passphrase = conn.sshPassphrase
-    } else if (conn.sshPassword) {
-      sshConfig.password = conn.sshPassword
-    } else {
-      throw new Error('SSH requires either privateKey or password')
-    }
+  async execCommand(conn: ConnectionConfig, options: ExecCommandOptions): Promise<void> {
+    if (!conn.useSSH) throw new Error('Connection does not use SSH')
 
-    const client = await this.connectSSH(sshConfig)
+    const client = await this.connectSSH(this.buildSSHConfig(conn))
+    try {
+      await this.runCommand(client, options)
+    } finally {
+      try {
+        client.end()
+      } catch {
+        // noop
+      }
+    }
+  }
+
+  private async createTunnel(conn: ConnectionConfig): Promise<number> {
+    const client = await this.connectSSH(this.buildSSHConfig(conn))
     try {
       const { server, port } = await this.startLocalForwardingServer(client, conn.host, conn.port)
 
@@ -84,12 +89,73 @@ class SSHService {
     }
   }
 
+  private buildSSHConfig(conn: ConnectionConfig): ConnectConfig {
+    const sshConfig: ConnectConfig = {
+      host: conn.sshHost,
+      port: conn.sshPort || 22,
+      username: conn.sshUsername,
+      readyTimeout: 15000,
+      keepaliveInterval: 30000
+    }
+    if (conn.sshPrivateKey) {
+      sshConfig.privateKey = conn.sshPrivateKey
+      if (conn.sshPassphrase) sshConfig.passphrase = conn.sshPassphrase
+    } else if (conn.sshPassword) {
+      sshConfig.password = conn.sshPassword
+    } else {
+      throw new Error('SSH requires either privateKey or password')
+    }
+
+    return sshConfig
+  }
+
   private connectSSH(cfg: ConnectConfig): Promise<Client> {
     return new Promise((resolve, reject) => {
       const c = new Client()
       c.once('ready', () => resolve(c))
       c.once('error', (err) => reject(err))
       c.connect(cfg)
+    })
+  }
+
+  private runCommand(client: Client, options: ExecCommandOptions): Promise<void> {
+    return new Promise((resolve, reject) => {
+      client.exec(options.command, (error, channel) => {
+        if (error) {
+          reject(error)
+          return
+        }
+
+        let exitCode: number | null = null
+        let stderr = ''
+        let pending = Promise.resolve()
+
+        channel.on('data', (chunk: Buffer | string) => {
+          if (!options.onStdout) return
+          const buffer = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk)
+          pending = pending.then(() => options.onStdout?.(buffer))
+        })
+        channel.stderr.on('data', (chunk: Buffer | string) => {
+          const text = chunk.toString()
+          stderr += text
+          if (!options.onStderr) return
+          pending = pending.then(() => options.onStderr?.(text))
+        })
+        channel.once('exit', (code: number | null) => {
+          exitCode = code
+        })
+        channel.once('close', () => {
+          pending
+            .then(() => {
+              if (exitCode === null || exitCode === 0) {
+                resolve()
+                return
+              }
+              reject(new Error(stderr.trim() || `Remote command exited with code ${exitCode}`))
+            })
+            .catch(reject)
+        })
+      })
     })
   }
 

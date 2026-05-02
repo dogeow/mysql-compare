@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, FileCode2, Folder, GitCompareArrows, Search, Table as TableIcon, X } from 'lucide-react'
+import { Download, FileCode2, Folder, GitCompareArrows, Search, SquareTerminal, Table as TableIcon, X } from 'lucide-react'
 import { Tabs } from '@renderer/components/ui/tabs'
 import { Button } from '@renderer/components/ui/button'
 import { DatabaseExportTaskView } from '@renderer/components/table-view/DatabaseExportTaskView'
@@ -11,6 +11,7 @@ import { TableCompareView } from '@renderer/components/diff/TableCompareView'
 import { SQLQueryView } from '@renderer/components/sql/SQLQueryView'
 import { SSHFileEditor } from '@renderer/components/ssh/SSHFileEditor'
 import { SSHFileManager } from '@renderer/components/ssh/SSHFileManager'
+import { SSHTerminalView } from '@renderer/components/ssh/SSHTerminalView'
 import { useUIStore, type WorkspaceTab, type WorkspaceView } from '@renderer/store/ui-store'
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type Translator } from '@renderer/i18n'
@@ -39,6 +40,7 @@ function getTabDisplayTitle(view: WorkspaceView, t: Translator): string {
     return `${t('workspace.tabTitle.comparePrefix')} · ${view.table}`
   }
   if (view.kind === 'ssh-files') return `${t('workspace.tabTitle.sshFilesPrefix')} · ${view.connectionName}`
+  if (view.kind === 'ssh-terminal') return `${t('workspace.tabTitle.sshTerminalPrefix')} · ${view.connectionName}`
   if (view.kind === 'ssh-editor') {
     return `${t('workspace.tabTitle.sshEditorPrefix')} · ${view.path.split('/').filter(Boolean).pop() ?? view.path}`
   }
@@ -302,6 +304,8 @@ export function Workspace() {
                   <Download className="h-3.5 w-3.5 shrink-0" />
                 ) : tab.view.kind === 'ssh-editor' ? (
                   <FileCode2 className="h-3.5 w-3.5 shrink-0" />
+                ) : tab.view.kind === 'ssh-terminal' ? (
+                  <SquareTerminal className="h-3.5 w-3.5 shrink-0" />
                 ) : tab.view.kind === 'ssh-files' ? (
                   <Folder className="h-3.5 w-3.5 shrink-0" />
                 ) : (
@@ -450,6 +454,8 @@ export function Workspace() {
                         <GitCompareArrows className="h-4 w-4 shrink-0" />
                       ) : tab.view.kind === 'sql' || tab.view.kind === 'ssh-editor' ? (
                         <FileCode2 className="h-4 w-4 shrink-0" />
+                      ) : tab.view.kind === 'ssh-terminal' ? (
+                        <SquareTerminal className="h-4 w-4 shrink-0" />
                       ) : tab.view.kind === 'database-export' ? (
                         <Download className="h-4 w-4 shrink-0" />
                       ) : tab.view.kind === 'ssh-files' ? (
@@ -508,6 +514,12 @@ export function Workspace() {
                 />
               ) : tab.view.kind === 'ssh-files' ? (
                 <SSHFileManager connectionId={tab.view.connectionId} connectionName={tab.view.connectionName} />
+              ) : tab.view.kind === 'ssh-terminal' ? (
+                <SSHTerminalView
+                  connectionId={tab.view.connectionId}
+                  connectionName={tab.view.connectionName}
+                  active={active}
+                />
               ) : tab.view.kind === 'ssh-editor' ? (
                 <SSHFileEditor
                   connectionId={tab.view.connectionId}
