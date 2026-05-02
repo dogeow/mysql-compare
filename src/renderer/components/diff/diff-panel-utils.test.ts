@@ -6,6 +6,7 @@ import {
   DEFAULT_TABLE_COMPARE_CONCURRENCY,
   DEFAULT_TABLE_SEARCH_QUERY,
   MAX_DIFF_ENDPOINT_HISTORY,
+  TABLE_COMPARE_CONCURRENCY_OPTIONS,
   createDiffEndpointHistoryKey,
   filterDiffEndpointHistoryByConnections,
   filterChangedRowComparisons,
@@ -336,11 +337,13 @@ describe('diff-panel-utils', () => {
   })
 
   it('restores persisted filter and concurrency preferences while keeping compare setup expanded initially', () => {
+    const restoredConcurrency = TABLE_COMPARE_CONCURRENCY_OPTIONS[2]
+
     expect(
       parseDiffPanelPreferences(
         JSON.stringify({
           statusFilter: 'row-changed',
-          tableCompareConcurrency: 8,
+          tableCompareConcurrency: restoredConcurrency,
           resultTab: 'data',
           setupExpanded: false,
           tableSearchQuery: 'users'
@@ -348,7 +351,7 @@ describe('diff-panel-utils', () => {
       )
     ).toEqual({
       statusFilter: 'row-changed',
-      tableCompareConcurrency: 8,
+      tableCompareConcurrency: restoredConcurrency,
       resultTab: 'data',
       setupExpanded: DEFAULT_COMPARE_SETUP_EXPANDED,
       tableSearchQuery: 'users',
