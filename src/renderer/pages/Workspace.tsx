@@ -222,7 +222,7 @@ export function Workspace() {
       <div
         role="tablist"
         aria-label={t('workspace.tabList')}
-        className="flex items-center gap-1 overflow-x-auto border-b border-border bg-card/95 px-2 py-1.5"
+        className="flex h-[53px] items-center gap-1 overflow-x-auto border-b border-border bg-card/95 px-2"
       >
         {workspaceTabs.map((tab) => {
           const active = tab.id === activeTab.id
@@ -270,7 +270,7 @@ export function Workspace() {
                 setDragOverTabId(null)
               }}
               className={cn(
-                'group flex min-w-0 shrink-0 items-center gap-1 rounded-md border px-2 py-1 text-sm transition-colors',
+                'group flex h-9 min-w-0 shrink-0 items-center gap-1 rounded-md border px-2 text-sm transition-colors',
                 active
                   ? 'border-primary/35 bg-accent text-foreground shadow-sm'
                   : 'border-transparent text-muted-foreground hover:bg-accent/70 hover:text-foreground',
@@ -291,7 +291,7 @@ export function Workspace() {
                 aria-selected={active}
                 tabIndex={active ? 0 : -1}
                 title={title}
-                className="flex h-6 min-w-0 items-center gap-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
+                className="flex h-8 min-w-0 items-center gap-2 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring"
                 onClick={() => setActiveTab(tab.id)}
               >
                 {tab.view.kind === 'diff' || tab.view.kind === 'table-compare' ? (
@@ -312,7 +312,7 @@ export function Workspace() {
               <button
                 type="button"
                 className={cn(
-                  'rounded p-0.5 transition-opacity hover:bg-background/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
+                  'flex h-7 w-7 items-center justify-center rounded transition-opacity hover:bg-background/80 focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring',
                   active ? 'opacity-100' : 'opacity-0 group-hover:opacity-100 focus-visible:opacity-100'
                 )}
                 onClick={(event) => {

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { api, unwrap } from '@renderer/lib/api'
 import type { Translator } from '@renderer/i18n'
 import type { TableComparisonResult } from '../../../shared/types'
@@ -48,6 +48,11 @@ interface UseDiffComparisonResult {
   showAllRowComparisons: boolean
   setShowAllRowComparisons: Dispatch<SetStateAction<boolean>>
   runCompare: () => Promise<void>
+  removeComparedTable: (event: {
+    connectionId: string
+    database: string
+    table: string
+  }) => void
 }
 
 export function useStoredDiffPanelPreferences(): [
@@ -121,6 +126,31 @@ export function useDiffComparison({
   const [showSync, setShowSync] = useState(false)
   const [showAllRowComparisons, setShowAllRowComparisons] = useState(false)
   const compareRunIdRef = useRef(0)
+
+  const removeComparedTable = useCallback((event: {
+    connectionId: string
+    database: string
+    table: string
+  }) => {
+    if (!compareContext) return
+
+    const matchesSource =
+      event.connectionId === compareContext.sourceConnectionId &&
+      event.database === compareContext.sourceDatabase
+    const matchesTarget =
+      event.connectionId === compareContext.targetConnectionId &&
+      event.database === compareContext.targetDatabase
+
+    if (!matchesSource && !matchesTarget) return
+
+    if (matchesSource) {
+      setSourceTables((tables) => tables.filter((table) => table !== event.table))
+    }
+    if (matchesTarget) {
+      setTargetTables((tables) => tables.filter((table) => table !== event.table))
+    }
+    setComparisonEntries((entries) => entries.filter((entry) => entry.table !== event.table))
+  }, [compareContext])
 
   const runCompare = async () => {
     if (!sourceConnectionId || !targetConnectionId || !sourceDatabase || !targetDatabase) {
@@ -260,7 +290,8 @@ export function useDiffComparison({
     setShowSync,
     showAllRowComparisons,
     setShowAllRowComparisons,
-    runCompare
+    runCompare,
+    removeComparedTable
   }
 }
 

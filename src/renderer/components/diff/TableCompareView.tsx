@@ -1,8 +1,9 @@
-import { useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction, type UIEvent } from 'react'
-import { ArrowRight, RefreshCw } from 'lucide-react'
+import { useEffect, useMemo, useRef, useState, type Dispatch, type MouseEvent, type SetStateAction, type UIEvent } from 'react'
+import { ArrowRight, RefreshCw, Trash2 } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Badge } from '@renderer/components/ui/badge'
 import { Button } from '@renderer/components/ui/button'
+import { pickPK } from '@renderer/lib/utils'
 import { useConnectionStore } from '@renderer/store/connection-store'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n } from '@renderer/i18n'
@@ -15,6 +16,7 @@ import {
   type ComparedTableRowsQuery
 } from './table-compare-data-cache'
 import {
+  buildCompareColumns,
   buildCopyValues,
   buildOverwriteTargetSyncRequest,
   buildRowKey
@@ -62,11 +64,13 @@ export function TableCompareView({
   const [selectedSourceRows, setSelectedSourceRows] = useState<Record<string, Record<string, unknown>>>({})
   const [copying, setCopying] = useState(false)
   const [overwriting, setOverwriting] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const sourceScrollRef = useRef<HTMLDivElement | null>(null)
   const targetScrollRef = useRef<HTMLDivElement | null>(null)
   const syncScrollFrameRef = useRef<number | null>(null)
   const syncingScrollRef = useRef(false)
   const cacheScopeKeyRef = useRef<string | null>(null)
+  const sourceSelectionAnchorKeyRef = useRef<string | null>(null)
 
   if (cacheScopeKeyRef.current === null) {
     tableCompareCacheScopeCounter += 1
@@ -95,10 +99,15 @@ export function TableCompareView({
     () => (stableOrderColumn ? { column: stableOrderColumn, dir: 'ASC' as const } : undefined),
     [stableOrderColumn]
   )
+  const compareColumns = useMemo(
+    () => buildCompareColumns(sourceState.data?.columns ?? [], targetState.data?.columns ?? []),
+    [sourceState.data?.columns, targetState.data?.columns]
+  )
 
   useEffect(() => {
     setPage(1)
     setSelectedSourceRows({})
+    sourceSelectionAnchorKeyRef.current = null
     setSourceState({
       data: null,
       error: null,
@@ -201,6 +210,14 @@ export function TableCompareView({
       .map((row) => buildRowKey(row, sourceKeyColumns))
       .filter((key): key is string => key !== null)
   }, [sourceKeyColumns, sourceSelectionEnabled, sourceState.data])
+  const visibleSourceRowsWithKeys = useMemo(() => {
+    if (!sourceState.data || !sourceSelectionEnabled) return []
+
+    return sourceState.data.rows.flatMap((row) => {
+      const key = buildRowKey(row, sourceKeyColumns)
+      return key ? [{ key, row }] : []
+    })
+  }, [sourceKeyColumns, sourceSelectionEnabled, sourceState.data])
   const visibleSourceKeySet = useMemo(() => new Set(visibleSourceKeys), [visibleSourceKeys])
   const allVisibleSelected =
     visibleSourceKeys.length > 0 && visibleSourceKeys.every((key) => selectedKeySet.has(key))
@@ -213,7 +230,7 @@ export function TableCompareView({
     () => getRowDiffNavigation(comparedTables, diffTables, table),
     [comparedTables, diffTables, table]
   )
-  const actionBusy = copying || overwriting
+  const actionBusy = copying || overwriting || deleting
 
   const refreshBoth = () => {
     setSourceReloadToken((current) => current + 1)
@@ -234,11 +251,35 @@ export function TableCompareView({
     })
   }
 
-  const toggleSourceRow = (row: Record<string, unknown>) => {
+  const toggleSourceRow = (row: Record<string, unknown>, event: MouseEvent<HTMLInputElement>) => {
     const rowKey = buildRowKey(row, sourceKeyColumns)
     if (!rowKey) return
 
+    const anchorKey = sourceSelectionAnchorKeyRef.current
+    const shouldSelect = event.currentTarget.checked
+
     setSelectedSourceRows((current) => {
+      if (event.shiftKey && anchorKey) {
+        const anchorIndex = visibleSourceRowsWithKeys.findIndex((item) => item.key === anchorKey)
+        const rowIndex = visibleSourceRowsWithKeys.findIndex((item) => item.key === rowKey)
+
+        if (anchorIndex !== -1 && rowIndex !== -1) {
+          const [start, end] =
+            anchorIndex < rowIndex ? [anchorIndex, rowIndex] : [rowIndex, anchorIndex]
+          const next = { ...current }
+
+          for (const item of visibleSourceRowsWithKeys.slice(start, end + 1)) {
+            if (shouldSelect) {
+              next[item.key] = item.row
+            } else {
+              delete next[item.key]
+            }
+          }
+
+          return next
+        }
+      }
+
       if (current[rowKey]) {
         const { [rowKey]: _removed, ...rest } = current
         return rest
@@ -249,6 +290,8 @@ export function TableCompareView({
         [rowKey]: row
       }
     })
+
+    sourceSelectionAnchorKeyRef.current = rowKey
   }
 
   const toggleAllVisibleSourceRows = () => {
@@ -334,6 +377,61 @@ export function TableCompareView({
     }
   }
 
+  const deleteSelectedSourceRows = async () => {
+    if (!sourceState.data || selectedCount === 0) return
+    if (!sourceSelectionEnabled) {
+      showToast(t('tableData.refuseNoPrimaryKey'), 'error')
+      return
+    }
+    if (!confirm(t('diff.compareView.confirmDeleteSelectedSourceRows', { count: selectedCount }))) return
+
+    setDeleting(true)
+
+    try {
+      const deletedRowKeys = new Set(Object.keys(selectedSourceRows))
+      const pkRows = Object.values(selectedSourceRows).map((row) => pickPK(row, sourceKeyColumns))
+      const result = await unwrap(
+        api.db.deleteRows({
+          connectionId: sourceConnectionId,
+          database: sourceDatabase,
+          table,
+          pkRows
+        })
+      )
+      const affectedRows = (result as { affectedRows: number }).affectedRows
+
+      setSelectedSourceRows({})
+      sourceSelectionAnchorKeyRef.current = null
+      setSourceState((current) => {
+        if (!current.data) return current
+
+        return {
+          ...current,
+          data: {
+            ...current.data,
+            rows: current.data.rows.filter((row) => {
+              const rowKey = buildRowKey(row, current.data!.primaryKey)
+              return !rowKey || !deletedRowKeys.has(rowKey)
+            }),
+            total: Math.max(0, current.data.total - affectedRows)
+          }
+        }
+      })
+      setSourceReloadToken((current) => current + 1)
+
+      showToast(
+        t('diff.compareView.deleteSuccess', {
+          count: affectedRows
+        }),
+        'success'
+      )
+    } catch (err) {
+      showToast((err as Error).message, 'error')
+    } finally {
+      setDeleting(false)
+    }
+  }
+
   const overwriteTargetTable = async () => {
     if (!sourceState.data) return
     if (!confirm(t('diff.compareView.confirmOverwriteTargetTable', { table }))) return
@@ -393,30 +491,81 @@ export function TableCompareView({
 
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden">
-      <div className="border-b border-border bg-card px-4 py-3">
-        <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
-          <div className="min-w-0 space-y-1">
-            <div className="text-xs text-muted-foreground">{t('diff.compareView.sideBySide')}</div>
-            <div className="flex flex-wrap items-center gap-2 text-sm">
-              <strong className="truncate">{sourceConnectionName}</strong>
-              <span className="text-muted-foreground">/</span>
-              <span className="truncate">{sourceDatabase}</span>
-              <span className="text-muted-foreground">→</span>
-              <strong className="truncate">{targetConnectionName}</strong>
-              <span className="text-muted-foreground">/</span>
-              <span className="truncate">{targetDatabase}</span>
-              <Badge>{table}</Badge>
+      <div className="border-b border-border bg-card px-4 py-2">
+        <div className="flex min-w-0 items-center gap-3 overflow-x-auto text-xs text-muted-foreground">
+          {rowDiffNavigation.totalDiffTables > 0 && (
+            <div className="flex shrink-0 items-center gap-1.5">
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3"
+                disabled={!rowDiffNavigation.previousTable}
+                onClick={() =>
+                  rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
+                }
+              >
+                {t('diff.compareView.prevDiff')}
+              </Button>
+              <span className="tabular-nums">
+                {rowDiffNavigation.currentDiffPosition === null
+                  ? t('diff.compareView.diffsChanged', { count: rowDiffNavigation.totalDiffTables })
+                  : t('diff.compareView.diffPos', {
+                      pos: rowDiffNavigation.currentDiffPosition,
+                      total: rowDiffNavigation.totalDiffTables
+                    })}
+              </span>
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-8 px-3"
+                disabled={!rowDiffNavigation.nextTable}
+                onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
+              >
+                {t('diff.compareView.nextDiff')}
+              </Button>
             </div>
-            <p className="text-xs text-muted-foreground">
-              {stableOrderColumn
-                ? t('diff.compareView.orderedBy', { column: stableOrderColumn })
-                : t('diff.compareView.noSharedPk')}
-            </p>
+          )}
+          <div className="flex shrink-0 items-center gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-3"
+              disabled={page <= 1}
+              onClick={() => setPage(page - 1)}
+            >
+              {t('diff.compareView.prev')}
+            </Button>
+            <span className="tabular-nums">
+              {t('diff.compareView.pageOf', { page, total: totalPages })}
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="h-8 px-3"
+              disabled={page >= totalPages}
+              onClick={() => setPage(page + 1)}
+            >
+              {t('diff.compareView.next')}
+            </Button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 xl:justify-end">
-            <Badge>{t('diff.compareView.selected', { count: selectedCount })}</Badge>
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <Badge className="h-8 px-3 text-xs">{t('diff.compareView.selected', { count: selectedCount })}</Badge>
             <Button size="sm" variant="outline" onClick={refreshBoth}>
               <RefreshCw className="mr-1 h-4 w-4" /> {t('common.refresh')}
+            </Button>
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={deleteSelectedSourceRows}
+              disabled={
+                actionBusy ||
+                selectedCount === 0 ||
+                !sourceSelectionEnabled ||
+                sourceState.loading
+              }
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              {deleting ? t('diff.compareView.deleting') : t('diff.compareView.deleteSelectedSourceRows')}
             </Button>
             <Button
               size="sm"
@@ -450,65 +599,8 @@ export function TableCompareView({
             </Button>
           </div>
         </div>
-        <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">
-          {rowDiffNavigation.totalDiffTables > 0 && (
-            <div className="flex items-center gap-1.5">
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 px-2"
-                disabled={!rowDiffNavigation.previousTable}
-                onClick={() =>
-                  rowDiffNavigation.previousTable && navigateToTable(rowDiffNavigation.previousTable)
-                }
-              >
-                {t('diff.compareView.prevDiff')}
-              </Button>
-              <span className="tabular-nums">
-                {rowDiffNavigation.currentDiffPosition === null
-                  ? t('diff.compareView.diffsChanged', { count: rowDiffNavigation.totalDiffTables })
-                  : t('diff.compareView.diffPos', {
-                      pos: rowDiffNavigation.currentDiffPosition,
-                      total: rowDiffNavigation.totalDiffTables
-                    })}
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 px-2"
-                disabled={!rowDiffNavigation.nextTable}
-                onClick={() => rowDiffNavigation.nextTable && navigateToTable(rowDiffNavigation.nextTable)}
-              >
-                {t('diff.compareView.nextDiff')}
-              </Button>
-            </div>
-          )}
-          <div className="ml-auto flex items-center gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2"
-              disabled={page <= 1}
-              onClick={() => setPage(page - 1)}
-            >
-              {t('diff.compareView.prev')}
-            </Button>
-            <span className="tabular-nums">
-              {t('diff.compareView.pageOf', { page, total: totalPages })}
-            </span>
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 px-2"
-              disabled={page >= totalPages}
-              onClick={() => setPage(page + 1)}
-            >
-              {t('diff.compareView.next')}
-            </Button>
-          </div>
-        </div>
         {sourceState.data && !sourceState.data.hasPrimaryKey && (
-          <div className="mt-3 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
+          <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
             {t('diff.compareView.noPkCopyDisabled')}
           </div>
         )}
@@ -531,6 +623,8 @@ export function TableCompareView({
           onToggleAllVisible={toggleAllVisibleSourceRows}
           allVisibleSelected={allVisibleSelected}
           onToggleRow={toggleSourceRow}
+          compareColumns={compareColumns}
+          side="source"
         />
 
         <TableComparePane
@@ -544,6 +638,8 @@ export function TableCompareView({
           scrollContainerRef={targetScrollRef}
           onScroll={(event) => syncPaneScroll('target', event)}
           leadingSpacer={sourceSelectionEnabled}
+          compareColumns={compareColumns}
+          side="target"
         />
       </div>
     </div>

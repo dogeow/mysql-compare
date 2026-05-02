@@ -38,11 +38,19 @@ export interface WorkspaceTab {
   view: WorkspaceView
 }
 
+export interface TableDropEvent {
+  id: number
+  connectionId: string
+  database: string
+  table: string
+}
+
 interface UIState {
   rightView: RightView
   workspaceTabs: WorkspaceTab[]
   activeTabId: string | null
   tableReloadTokens: Record<string, number>
+  latestTableDropEvent: TableDropEvent | null
   setRightView: (v: RightView) => void
   setActiveTab: (tabId: string) => void
   closeTab: (tabId: string) => void
@@ -56,6 +64,7 @@ interface UIState {
   closeTableTabs: (connectionId: string, database: string, table: string) => void
   moveSSHPathTabs: (connectionId: string, oldPath: string, newPath: string) => void
   refreshTableData: (connectionId: string, database: string, table: string) => void
+  markTableDropped: (connectionId: string, database: string, table: string) => void
   toast: { message: string; level: 'info' | 'error' | 'success' } | null
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
   clearToast: () => void
@@ -170,6 +179,7 @@ export const useUIStore = create<UIState>((set) => ({
   workspaceTabs: [],
   activeTabId: null,
   tableReloadTokens: {},
+  latestTableDropEvent: null,
   setRightView: (view) =>
     set((state) => {
       if (view.kind === 'empty') {
@@ -419,6 +429,18 @@ export const useUIStore = create<UIState>((set) => ({
         tableReloadTokens: {
           ...state.tableReloadTokens,
           [key]: (state.tableReloadTokens[key] ?? 0) + 1
+        }
+      }
+    }),
+  markTableDropped: (connectionId, database, table) =>
+    set((state) => {
+      return {
+        ...state,
+        latestTableDropEvent: {
+          id: (state.latestTableDropEvent?.id ?? 0) + 1,
+          connectionId,
+          database,
+          table
         }
       }
     }),

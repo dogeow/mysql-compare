@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import type { ColumnInfo } from '../../../shared/types'
 import {
+  buildCompareColumns,
   buildCopyValues,
   buildOverwriteTargetSyncRequest,
   buildRowKey
@@ -20,6 +21,21 @@ function createColumn(name: string): ColumnInfo {
 }
 
 describe('table-compare-utils', () => {
+  it('builds a shared compare column list from source order plus target-only columns', () => {
+    const columns = buildCompareColumns(
+      [createColumn('id'), createColumn('name'), createColumn('created_at')],
+      [createColumn('id'), createColumn('name'), createColumn('target_only')]
+    )
+
+    expect(columns.map((column) => column.name)).toEqual(['id', 'name', 'created_at', 'target_only'])
+    expect(columns[0]?.source?.name).toBe('id')
+    expect(columns[0]?.target?.name).toBe('id')
+    expect(columns[2]?.source?.name).toBe('created_at')
+    expect(columns[2]?.target).toBeUndefined()
+    expect(columns[3]?.source).toBeUndefined()
+    expect(columns[3]?.target?.name).toBe('target_only')
+  })
+
   it('builds a stable row key from the provided key columns', () => {
     expect(buildRowKey({ id: 7, tenant_id: 'acme', name: 'Ada' }, ['tenant_id', 'id'])).toBe(
       JSON.stringify([

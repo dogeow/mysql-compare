@@ -402,7 +402,9 @@ export const en = {
       selected: '{{count}} selected',
       copying: 'Copying...',
       overwritingTargetTable: 'Overwriting...',
+      deleting: 'Deleting...',
       copySelectedToTarget: 'Copy selected to Target',
+      deleteSelectedSourceRows: 'Delete selected rows',
       overwriteTargetTable: 'Overwrite Target Table',
       prevDiff: '← Prev diff',
       diffsChanged: '{{count}} changed',
@@ -416,6 +418,9 @@ export const en = {
       noSharedTargetCols: 'No shared target columns are available for the selected row.',
       copyMixed: 'Copied {{copied}} row(s); {{failed}} failed',
       copySuccess: 'Copied {{count}} row(s) to target',
+      confirmDeleteSelectedSourceRows:
+        'Delete {{count}} selected source row(s)? This cannot be undone.',
+      deleteSuccess: 'Deleted {{count}} row(s)',
       confirmOverwriteTargetTable:
         'Overwrite target table "{{table}}" with the full source table? This will recreate the target structure and replace all target data.',
       overwriteSuccess: 'Overwrote target table "{{table}}" from the source table',
@@ -426,6 +431,9 @@ export const en = {
       noPrimaryKey: 'No primary key',
       loadingRows: 'Loading rows...',
       noRowsOnPage: 'No rows found on this page.',
+      missingColumn: 'missing',
+      notPresent: 'not present',
+      peerType: 'other side: {{type}}',
     },
   },
   tableData: {

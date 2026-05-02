@@ -110,8 +110,8 @@ export function SidebarTree({
 
   return (
     <>
-      <div className="space-y-2 border-b border-border p-2">
-        <div className="flex gap-1">
+      <div className="flex h-[53px] items-center border-b border-border px-2">
+        <div className="flex w-full gap-1">
           <div className="relative flex-1">
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
@@ -121,7 +121,7 @@ export function SidebarTree({
                 if (event.key === 'Escape') onKeywordChange('')
               }}
               placeholder={t('sidebar.searchConnection')}
-              className="h-8 pl-7 pr-7"
+              className="h-9 pl-7 pr-7"
             />
             {keyword && (
               <button

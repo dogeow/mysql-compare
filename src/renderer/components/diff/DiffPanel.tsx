@@ -45,7 +45,7 @@ import {
 
 export function DiffPanel() {
   const { connections, refresh } = useConnectionStore()
-  const { setRightView, showToast } = useUIStore()
+  const { setRightView, showToast, latestTableDropEvent } = useUIStore()
   const { t } = useI18n()
 
   const restoredEndpointHistoryRef = useRef(false)
@@ -74,7 +74,8 @@ export function DiffPanel() {
     setShowSync,
     showAllRowComparisons,
     setShowAllRowComparisons,
-    runCompare
+    runCompare,
+    removeComparedTable
   } = useDiffComparison({
     sourceConnectionId: srcId,
     sourceDatabase: srcDb,
@@ -100,6 +101,18 @@ export function DiffPanel() {
       }))
     }
   })
+  const handledTableDropEventIdRef = useRef(0)
+
+  useEffect(() => {
+    if (!latestTableDropEvent) return
+    if (latestTableDropEvent.id <= handledTableDropEventIdRef.current) return
+
+    handledTableDropEventIdRef.current = latestTableDropEvent.id
+    removeComparedTable(latestTableDropEvent)
+    setSelectedComparisonTable((current) =>
+      current === latestTableDropEvent.table ? null : current
+    )
+  }, [latestTableDropEvent, removeComparedTable])
 
   useEffect(() => {
     let active = true

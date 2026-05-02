@@ -34,26 +34,27 @@ interface TablesTabContentProps {
 export function TablesTabContent({
   sourceTables,
   targetTables,
-  sharedTableCount,
   phase
 }: TablesTabContentProps) {
   const { t } = useI18n()
+  const sourceTableSet = new Set(sourceTables)
+  const targetTableSet = new Set(targetTables)
+
   return (
     <div className="flex min-h-0 flex-1 flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-        <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {t('diff.result.sourceTables', { count: sourceTables.length })}
-        </Badge>
-        <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {t('diff.result.sharedTables', { count: sharedTableCount })}
-        </Badge>
-        <Badge className="border border-border/60 bg-card/70 text-muted-foreground">
-          {t('diff.result.targetTables', { count: targetTables.length })}
-        </Badge>
-      </div>
       <div className="grid min-h-0 flex-1 grid-cols-1 gap-3 xl:grid-cols-2">
-        <TableListPanel title={t('diff.result.sourcePanelTitle')} tables={sourceTables} phase={phase} />
-        <TableListPanel title={t('diff.result.targetPanelTitle')} tables={targetTables} phase={phase} />
+        <TableListPanel
+          title={t('diff.result.sourcePanelTitle')}
+          tables={sourceTables}
+          phase={phase}
+          getPresence={(table) => (targetTableSet.has(table) ? 'shared' : 'source-only')}
+        />
+        <TableListPanel
+          title={t('diff.result.targetPanelTitle')}
+          tables={targetTables}
+          phase={phase}
+          getPresence={(table) => (sourceTableSet.has(table) ? 'shared' : 'target-only')}
+        />
       </div>
     </div>
   )

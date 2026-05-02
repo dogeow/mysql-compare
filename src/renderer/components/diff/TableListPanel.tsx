@@ -7,9 +7,10 @@ interface TableListPanelProps {
   title: string
   tables: string[]
   phase: ComparePhase
+  getPresence?: (table: string) => 'shared' | 'source-only' | 'target-only'
 }
 
-export function TableListPanel({ title, tables, phase }: TableListPanelProps) {
+export function TableListPanel({ title, tables, phase, getPresence }: TableListPanelProps) {
   const { t } = useI18n()
 
   return (
@@ -17,9 +18,6 @@ export function TableListPanel({ title, tables, phase }: TableListPanelProps) {
       <div className="flex items-center justify-between gap-2 border-b border-border/30 pb-2">
         <div className="flex min-w-0 items-center gap-2 text-left">
           <span className="text-xs font-medium text-muted-foreground">{title}</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <Badge>{tables.length}</Badge>
         </div>
       </div>
       {tables.length === 0 ? (
@@ -29,11 +27,27 @@ export function TableListPanel({ title, tables, phase }: TableListPanelProps) {
       ) : (
         <div className="mt-3 min-h-0 flex-1 overflow-auto pr-1">
           <div className="space-y-1.5">
-            {tables.map((table) => (
-              <div key={table} className="rounded-md bg-background/35 px-3 py-1.5 text-xs font-mono">
-                {table}
-              </div>
-            ))}
+            {tables.map((table) => {
+              const presence = getPresence?.(table) ?? 'shared'
+              return (
+                <div
+                  key={table}
+                  className="flex min-w-0 items-center justify-between gap-2 rounded-md bg-background/35 px-3 py-1.5 text-xs"
+                >
+                  <span className="min-w-0 truncate font-mono">{table}</span>
+                  {presence === 'source-only' && (
+                    <Badge variant="info" className="shrink-0">
+                      {t('diff.presentation.onlyInSource')}
+                    </Badge>
+                  )}
+                  {presence === 'target-only' && (
+                    <Badge variant="warning" className="shrink-0">
+                      {t('diff.presentation.onlyInTarget')}
+                    </Badge>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
       )}

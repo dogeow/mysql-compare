@@ -49,7 +49,15 @@ function loadStoredSidebarWidth(): number {
 
 export function Sidebar() {
   const { connections, refresh, remove } = useConnectionStore()
-  const { rightView, setRightView, renameTableTabs, closeTableTabs, refreshTableData, showToast } = useUIStore()
+  const {
+    rightView,
+    setRightView,
+    renameTableTabs,
+    closeTableTabs,
+    refreshTableData,
+    markTableDropped,
+    showToast
+  } = useUIStore()
   const { t } = useI18n()
   const [keyword, setKeyword] = useState('')
   const [editing, setEditing] = useState<SafeConnection | null>(null)
@@ -428,6 +436,7 @@ export function Sidebar() {
         })
       )
       await refreshDatabase(menu.connection, menu.database)
+      markTableDropped(menu.connection.id, menu.database, menu.table)
       closeTableTabs(menu.connection.id, menu.database, menu.table)
       showToast(t('sidebar.toast.droppedTable', { table: menu.table }), 'success')
     } catch (err) {
