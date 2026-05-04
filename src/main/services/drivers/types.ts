@@ -4,8 +4,10 @@ import type {
   ColumnInfo,
   ConnectionConfig,
   CopyTableRequest,
+  DatabaseInfo,
   DbEngine,
   DeleteRowsRequest,
+  DropDatabaseRequest,
   DropTableRequest,
   InsertRowRequest,
   QueryRowsRequest,
@@ -54,6 +56,7 @@ export interface DbDriver {
   readonly dialect: Dialect
 
   listDatabases(): Promise<string[]>
+  getDatabaseInfo(database: string): Promise<DatabaseInfo>
   listTables(database: string): Promise<string[]>
   getTableSchema(database: string, table: string): Promise<TableSchema>
 
@@ -67,6 +70,7 @@ export interface DbDriver {
   deleteRows(req: DeleteRowsRequest): Promise<{ affectedRows: number }>
   renameTable(req: RenameTableRequest): Promise<{ table: string }>
   copyTable(req: CopyTableRequest): Promise<{ table: string }>
+  dropDatabase(req: DropDatabaseRequest): Promise<void>
   dropTable(req: DropTableRequest): Promise<void>
   executeSQL(sql: string, database?: string): Promise<unknown>
 

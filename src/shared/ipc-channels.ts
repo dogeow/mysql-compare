@@ -8,6 +8,7 @@ export const IPC = {
 
   // 数据库浏览（引擎无关）
   ListDatabases: 'db:listDatabases',
+  GetDatabaseInfo: 'db:getDatabaseInfo',
   ListTables: 'db:listTables',
   QueryRows: 'db:queryRows',
   InsertRow: 'db:insertRow',
@@ -16,6 +17,7 @@ export const IPC = {
   ExecuteSQL: 'db:executeSQL',
   RenameTable: 'db:renameTable',
   CopyTable: 'db:copyTable',
+  DropDatabase: 'db:dropDatabase',
   DropTable: 'db:dropTable',
   TruncateTable: 'db:truncateTable',
   ExportTable: 'db:exportTable',

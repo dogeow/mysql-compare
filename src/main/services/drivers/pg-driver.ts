@@ -7,7 +7,9 @@ import type {
   ColumnInfo,
   ConnectionConfig,
   CopyTableRequest,
+  DatabaseInfo,
   DeleteRowsRequest,
+  DropDatabaseRequest,
   DropTableRequest,
   IndexInfo,
   InsertRowRequest,
@@ -81,13 +83,81 @@ export class PostgresDriver implements DbDriver {
   }
 
   async listDatabases(): Promise<string[]> {
-    const pool = await this.getPool()
-    const res = await pool.query<{ datname: string }>(
-      `SELECT datname FROM pg_database
-       WHERE NOT datistemplate AND datallowconn
-       ORDER BY datname`
+    return this.withMaintenanceClient(undefined, async (client) => {
+      const result = await client.query<{ datname: string }>(
+        `SELECT datname FROM pg_database
+         WHERE NOT datistemplate AND datallowconn
+         ORDER BY datname`
+      )
+      return result.rows.map((row) => row.datname)
+    })
+  }
+
+  async getDatabaseInfo(database: string): Promise<DatabaseInfo> {
+    assertNonEmptySQL('database', database)
+
+    const metadata = await this.withMaintenanceClient(database, async (client) => {
+      const result = await client.query<{
+        datname: string
+        encoding: string
+        datcollate: string
+        owner: string
+        comment: string | null
+        total_size: string
+      }>(
+        `SELECT datname,
+                pg_encoding_to_char(encoding) AS encoding,
+                datcollate,
+                pg_get_userbyid(datdba) AS owner,
+                shobj_description(oid, 'pg_database') AS comment,
+                pg_database_size(datname)::bigint AS total_size
+         FROM pg_database
+         WHERE datname = $1
+         LIMIT 1`,
+        [database]
+      )
+      if ((result.rowCount ?? 0) === 0) {
+        throw new Error(`Database "${database}" not found`)
+      }
+      return result.rows[0]!
+    })
+
+    const pool = await this.getPool(database)
+    const tableCountResult = await pool.query<{ table_count: string }>(
+      `SELECT COUNT(*)::bigint AS table_count
+       FROM information_schema.tables
+       WHERE table_schema = $1 AND table_type = 'BASE TABLE'`,
+      [DEFAULT_SCHEMA]
     )
-    return res.rows.map((r) => r.datname)
+    const statsResult = await pool.query<{
+      row_estimate: string
+      data_length: string
+      index_length: string
+    }>(
+      `SELECT COALESCE(SUM(c.reltuples), 0)::bigint AS row_estimate,
+              COALESCE(SUM(pg_table_size(c.oid)), 0)::bigint AS data_length,
+              COALESCE(SUM(pg_indexes_size(c.oid)), 0)::bigint AS index_length
+       FROM pg_class c
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE n.nspname = $1 AND c.relkind = 'r'`,
+      [DEFAULT_SCHEMA]
+    )
+
+    const dataLength = Number(statsResult.rows[0]?.data_length ?? 0)
+    const indexLength = Number(statsResult.rows[0]?.index_length ?? 0)
+
+    return {
+      name: database,
+      tableCount: Number(tableCountResult.rows[0]?.table_count ?? 0),
+      rowEstimate: Number(statsResult.rows[0]?.row_estimate ?? 0),
+      dataLength,
+      indexLength,
+      totalSize: Number(metadata.total_size ?? 0),
+      charset: metadata.encoding,
+      collation: metadata.datcollate,
+      owner: metadata.owner,
+      comment: metadata.comment ?? undefined
+    }
   }
 
   async listTables(database: string): Promise<string[]> {
@@ -335,6 +405,24 @@ export class PostgresDriver implements DbDriver {
     }
   }
 
+  async dropDatabase(req: DropDatabaseRequest): Promise<void> {
+    assertNonEmptySQL('database', req.database)
+
+    await this.closePool(req.database)
+
+    await this.withMaintenanceClient(req.database, async (client) => {
+      const existsResult = await client.query<{ present: number }>(
+        `SELECT 1 AS present FROM pg_database WHERE datname = $1 LIMIT 1`,
+        [req.database]
+      )
+      if ((existsResult.rowCount ?? 0) === 0) {
+        throw new Error(`Database "${req.database}" not found`)
+      }
+
+      await client.query(`DROP DATABASE ${this.dialect.quoteIdent(req.database)}`)
+    })
+  }
+
   async dropTable(req: DropTableRequest): Promise<void> {
     await this.assertSourceExists(req.database, req.table)
     const pool = await this.getPool(req.database)
@@ -408,5 +496,50 @@ export class PostgresDriver implements DbDriver {
     if (await this.tableExists(database, table)) {
       throw new Error(`Table "${table}" already exists`)
     }
+  }
+
+  private async closePool(database?: string): Promise<void> {
+    const key = database || this.connection.database || 'postgres'
+    const pool = this.pools.get(key)
+    if (!pool) return
+
+    this.pools.delete(key)
+    await pool.end().catch(() => undefined)
+  }
+
+  private getMaintenanceCandidates(avoidDatabase?: string): string[] {
+    return Array.from(
+      new Set(
+        [this.connection.database, 'postgres', 'template1'].filter(
+          (database): database is string => Boolean(database && database !== avoidDatabase)
+        )
+      )
+    )
+  }
+
+  private async withMaintenanceClient<T>(
+    avoidDatabase: string | undefined,
+    run: (client: pg.Client) => Promise<T>
+  ): Promise<T> {
+    let lastError: unknown = new Error('Unable to connect to a maintenance database')
+
+    for (const database of this.getMaintenanceCandidates(avoidDatabase)) {
+      const client = new pg.Client(this.buildClientConfig(database))
+      try {
+        await client.connect()
+      } catch (error) {
+        lastError = error
+        await client.end().catch(() => undefined)
+        continue
+      }
+
+      try {
+        return await run(client)
+      } finally {
+        await client.end().catch(() => undefined)
+      }
+    }
+
+    throw lastError instanceof Error ? lastError : new Error(String(lastError))
   }
 }

@@ -1,4 +1,4 @@
-import { Copy, Download, Eraser, FileCode2, Pencil, RefreshCw, Trash2, Upload } from 'lucide-react'
+import { CircleEllipsis, Copy, Download, Eraser, FileCode2, Pencil, RefreshCw, Upload } from 'lucide-react'
 import { ConnectionDialog } from '@renderer/components/connection/ConnectionDialog'
 import { ExportDatabaseDialog } from '@renderer/components/table-view/ExportDatabaseDialog'
 import { ExportTableDialog } from '@renderer/components/table-view/ExportTableDialog'
@@ -30,16 +30,17 @@ interface SidebarOverlaysProps {
   onCloseTableMenu: () => void
   databaseMenu: DatabaseMenuState | null
   onCloseDatabaseMenu: () => void
+  onOpenDatabaseDetails: (menu: DatabaseMenuState) => void
   onOpenDatabaseSQLConsole: (menu: DatabaseMenuState) => void
   onExportDatabase: (menu: DatabaseMenuState) => void
   onRefreshDatabase: (menu: DatabaseMenuState) => void | Promise<void>
+  onOpenTableDetails: (menu: TableMenuState) => void
   onRenameTable: (menu: TableMenuState) => void
   onCopyTable: (menu: TableMenuState) => void | Promise<void>
   onShowCreateSQL: (menu: TableMenuState) => void | Promise<void>
   onExportTable: (menu: TableMenuState) => void
   onImportTable: (menu: TableMenuState) => void
   onTruncateTable: (menu: TableMenuState) => void | Promise<void>
-  onDropTable: (menu: TableMenuState) => void | Promise<void>
   renameDialog: RenameDialogState | null
   renameDraft: string
   actionBusy: boolean
@@ -68,16 +69,17 @@ export function SidebarOverlays({
   onCloseTableMenu,
   databaseMenu,
   onCloseDatabaseMenu,
+  onOpenDatabaseDetails,
   onOpenDatabaseSQLConsole,
   onExportDatabase,
   onRefreshDatabase,
+  onOpenTableDetails,
   onRenameTable,
   onCopyTable,
   onShowCreateSQL,
   onExportTable,
   onImportTable,
   onTruncateTable,
-  onDropTable,
   renameDialog,
   renameDraft,
   actionBusy,
@@ -116,6 +118,12 @@ export function SidebarOverlays({
             onClick={(event) => event.stopPropagation()}
           >
             <TableMenuItem
+              icon={<CircleEllipsis className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.tableDetails')}
+              onClick={() => onOpenTableDetails(tableMenu)}
+            />
+            <div className="my-1 h-px bg-border" />
+            <TableMenuItem
               icon={<Pencil className="h-3.5 w-3.5" />}
               label={t('sidebar.overlays.renameTable')}
               onClick={() => onRenameTable(tableMenu)}
@@ -147,12 +155,6 @@ export function SidebarOverlays({
               onClick={() => onTruncateTable(tableMenu)}
               danger
             />
-            <TableMenuItem
-              icon={<Trash2 className="h-3.5 w-3.5" />}
-              label={t('sidebar.overlays.dropTable')}
-              onClick={() => onDropTable(tableMenu)}
-              danger
-            />
           </div>
         </div>
       )}
@@ -164,6 +166,12 @@ export function SidebarOverlays({
             style={{ left: databaseMenu.x, top: databaseMenu.y }}
             onClick={(event) => event.stopPropagation()}
           >
+            <TableMenuItem
+              icon={<CircleEllipsis className="h-3.5 w-3.5" />}
+              label={t('sidebar.overlays.databaseDetails')}
+              onClick={() => onOpenDatabaseDetails(databaseMenu)}
+            />
+            <div className="my-1 h-px bg-border" />
             <TableMenuItem
               icon={<FileCode2 className="h-3.5 w-3.5" />}
               label={t('sidebar.overlays.openSqlConsole')}

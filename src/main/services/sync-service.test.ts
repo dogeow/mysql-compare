@@ -266,6 +266,14 @@ function createFakeDriver(options: {
     connectionId: options.connectionId,
     dialect: options.dialect ?? syncDialect,
     listDatabases: async () => [],
+    getDatabaseInfo: async () => ({
+      name: 'unused',
+      tableCount: 0,
+      rowEstimate: 0,
+      dataLength: 0,
+      indexLength: 0,
+      totalSize: 0
+    }),
     listTables,
     getTableSchema: async () => buildSchema('unused'),
     queryRows: async () => ({ rows: [], total: 0 }),
@@ -274,6 +282,7 @@ function createFakeDriver(options: {
     deleteRows: async () => ({ affectedRows: 0 }),
     renameTable: async () => ({ table: '' }),
     copyTable: async () => ({ table: '' }),
+    dropDatabase: async () => undefined,
     dropTable: async () => undefined,
     executeSQL,
     streamRows,

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Copy, Pencil } from 'lucide-react'
+import { AlertTriangle, Copy, Pencil, Trash2 } from 'lucide-react'
 import { api, unwrap } from '@renderer/lib/api'
 import { Button } from '@renderer/components/ui/button'
 import { Dialog } from '@renderer/components/ui/dialog'
@@ -16,13 +16,14 @@ interface Props {
 }
 
 export function TableInfoView({ connectionId, database, table }: Props) {
-  const { showToast } = useUIStore()
+  const { closeTableTabs, markTableDropped, showToast } = useUIStore()
   const { t } = useI18n()
   const [schema, setSchema] = useState<TableSchema | null>(null)
   const [commentDraft, setCommentDraft] = useState('')
   const [confirmSQL, setConfirmSQL] = useState<string | null>(null)
   const [editing, setEditing] = useState(false)
   const [busy, setBusy] = useState(false)
+  const [deleting, setDeleting] = useState(false)
   const requestIdRef = useRef(0)
 
   const loadSchema = async () => {
@@ -62,6 +63,29 @@ export function TableInfoView({ connectionId, database, table }: Props) {
   }
 
   const commentChanged = schema ? commentDraft !== (schema.tableComment ?? '') : false
+  const actionBusy = busy || deleting
+
+  const dropCurrentTable = async () => {
+    if (actionBusy) return
+    if (!confirm(t('sidebar.confirm.dropTable', { table }))) return
+
+    setDeleting(true)
+    try {
+      await unwrap(
+        api.db.dropTable({
+          connectionId,
+          database,
+          table
+        })
+      )
+      markTableDropped(connectionId, database, table)
+      showToast(t('sidebar.toast.droppedTable', { table }), 'success')
+      closeTableTabs(connectionId, database, table)
+    } catch (error) {
+      setDeleting(false)
+      showToast((error as Error).message, 'error')
+    }
+  }
 
   if (!schema) {
     return <div className="p-3 text-xs text-muted-foreground">{t('common.loading')}</div>
@@ -90,7 +114,7 @@ export function TableInfoView({ connectionId, database, table }: Props) {
             <h3 className="text-sm font-medium">{t('tableInfo.tableComment')}</h3>
             <div className="text-xs text-muted-foreground">{t('tableInfo.visibleHint')}</div>
           </div>
-          <Button size="sm" variant="outline" onClick={() => setEditing(true)}>
+          <Button size="sm" variant="outline" onClick={() => setEditing(true)} disabled={actionBusy}>
             <Pencil className="h-3.5 w-3.5" /> {t('tableInfo.editComment')}
           </Button>
         </div>
@@ -99,21 +123,39 @@ export function TableInfoView({ connectionId, database, table }: Props) {
         </div>
       </section>
 
+      <section className="mt-4 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+        <div className="flex flex-col gap-3 md:flex-row md:items-start md:justify-between">
+          <div className="min-w-0">
+            <div className="flex items-center gap-2 text-sm font-medium text-red-300">
+              <AlertTriangle className="h-4 w-4" />
+              {t('tableInfo.dangerZone')}
+            </div>
+            <div className="mt-1 text-xs leading-5 text-muted-foreground">
+              {t('tableInfo.dropTableDescription', { database, table })}
+            </div>
+          </div>
+          <Button variant="destructive" onClick={dropCurrentTable} disabled={actionBusy}>
+            <Trash2 className="h-3.5 w-3.5" />
+            {deleting ? t('tableInfo.droppingTable') : t('tableInfo.dropTable')}
+          </Button>
+        </div>
+      </section>
+
       {editing && (
         <Dialog
           open
           onOpenChange={(open) => {
-            if (!open && !busy) setEditing(false)
+            if (!open && !actionBusy) setEditing(false)
           }}
           title={t('tableInfo.editTableComment')}
           description={`${database}.${table}`}
           className="max-w-2xl"
           footer={
             <>
-              <Button variant="outline" onClick={() => setEditing(false)} disabled={busy}>
+              <Button variant="outline" onClick={() => setEditing(false)} disabled={actionBusy}>
                 {t('common.cancel')}
               </Button>
-              <Button onClick={() => setConfirmSQL(pendingSQL)} disabled={busy || !commentChanged}>
+              <Button onClick={() => setConfirmSQL(pendingSQL)} disabled={actionBusy || !commentChanged}>
                 {t('common.reviewSql')}
               </Button>
             </>
@@ -130,14 +172,14 @@ export function TableInfoView({ connectionId, database, table }: Props) {
         <Dialog
           open
           onOpenChange={(open) => {
-            if (!open && !busy) setConfirmSQL(null)
+            if (!open && !actionBusy) setConfirmSQL(null)
           }}
           title={t('tableInfo.confirmTableCommentChange')}
           description={t('tableInfo.reviewBeforeExecute')}
           className="max-w-3xl"
           footer={
             <>
-              <Button variant="outline" onClick={() => setConfirmSQL(null)} disabled={busy}>
+              <Button variant="outline" onClick={() => setConfirmSQL(null)} disabled={actionBusy}>
                 {t('common.back')}
               </Button>
               <Button
@@ -146,11 +188,11 @@ export function TableInfoView({ connectionId, database, table }: Props) {
                   navigator.clipboard.writeText(confirmSQL)
                   showToast(t('common.sqlCopied'), 'success')
                 }}
-                disabled={busy}
+                disabled={actionBusy}
               >
                 <Copy className="h-3.5 w-3.5" /> {t('common.copySql')}
               </Button>
-              <Button onClick={saveComment} disabled={busy}>
+              <Button onClick={saveComment} disabled={actionBusy}>
                 {busy ? t('tableInfo.executing') : t('common.confirmExecute')}
               </Button>
             </>

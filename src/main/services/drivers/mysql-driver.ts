@@ -1,10 +1,12 @@
 // MySQL 驱动实现。一个实例对应一个 connectionId，按 database 维护 mysql2 Pool。
-import mysql, { Pool, PoolOptions, RowDataPacket, ResultSetHeader } from 'mysql2/promise'
+import mysql, { Connection, Pool, PoolOptions, RowDataPacket, ResultSetHeader } from 'mysql2/promise'
 import type {
   ColumnInfo,
   ConnectionConfig,
   CopyTableRequest,
+  DatabaseInfo,
   DeleteRowsRequest,
+  DropDatabaseRequest,
   DropTableRequest,
   IndexInfo,
   InsertRowRequest,
@@ -20,6 +22,7 @@ import { MySQLPoolCache, type MySQLDriverPoolDebugSnapshot } from './mysql-pool-
 export type { MySQLDriverPoolDebugSnapshot } from './mysql-pool-cache'
 
 const MAX_PAGE_SIZE = 1000
+const SYSTEM_DATABASES = new Set(['information_schema', 'performance_schema', 'mysql', 'sys'])
 
 export class MySQLDriver implements DbDriver {
   readonly engine = 'mysql' as const
@@ -53,11 +56,54 @@ export class MySQLDriver implements DbDriver {
   }
 
   async listDatabases(): Promise<string[]> {
-    return this.poolCache.withPool(undefined, async (pool) => {
-      const [rows] = await pool.query<RowDataPacket[]>('SHOW DATABASES')
+    return this.withServerConnection(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>('SHOW DATABASES')
       return rows
-        .map((r) => Object.values(r)[0] as string)
-        .filter((d) => !['information_schema', 'performance_schema', 'mysql', 'sys'].includes(d))
+        .map((row) => Object.values(row)[0] as string)
+        .filter((database) => !SYSTEM_DATABASES.has(database))
+    })
+  }
+
+  async getDatabaseInfo(database: string): Promise<DatabaseInfo> {
+    assertNonEmptySQL('database', database)
+
+    return this.withServerConnection(async (connection) => {
+      const [databaseRows] = await connection.query<RowDataPacket[]>(
+        `SELECT SCHEMA_NAME, DEFAULT_CHARACTER_SET_NAME, DEFAULT_COLLATION_NAME
+         FROM information_schema.SCHEMATA
+         WHERE SCHEMA_NAME = ?
+         LIMIT 1`,
+        [database]
+      )
+      if (databaseRows.length === 0) {
+        throw new Error(`Database "${database}" not found`)
+      }
+
+      const [statRows] = await connection.query<RowDataPacket[]>(
+        `SELECT COUNT(*) AS TABLE_COUNT,
+                COALESCE(SUM(TABLE_ROWS), 0) AS ROW_ESTIMATE,
+                COALESCE(SUM(DATA_LENGTH), 0) AS DATA_LENGTH,
+                COALESCE(SUM(INDEX_LENGTH), 0) AS INDEX_LENGTH,
+                COALESCE(SUM(DATA_FREE), 0) AS DATA_FREE
+         FROM information_schema.TABLES
+         WHERE TABLE_SCHEMA = ? AND TABLE_TYPE = 'BASE TABLE'`,
+        [database]
+      )
+
+      const dataLength = Number(statRows[0]?.['DATA_LENGTH'] ?? 0)
+      const indexLength = Number(statRows[0]?.['INDEX_LENGTH'] ?? 0)
+
+      return {
+        name: database,
+        tableCount: Number(statRows[0]?.['TABLE_COUNT'] ?? 0),
+        rowEstimate: Number(statRows[0]?.['ROW_ESTIMATE'] ?? 0),
+        dataLength,
+        indexLength,
+        totalSize: dataLength + indexLength,
+        dataFree: Number(statRows[0]?.['DATA_FREE'] ?? 0),
+        charset: databaseRows[0]?.['DEFAULT_CHARACTER_SET_NAME'] as string | undefined,
+        collation: databaseRows[0]?.['DEFAULT_COLLATION_NAME'] as string | undefined
+      }
     })
   }
 
@@ -291,6 +337,21 @@ export class MySQLDriver implements DbDriver {
     })
   }
 
+  async dropDatabase(req: DropDatabaseRequest): Promise<void> {
+    assertNonEmptySQL('database', req.database)
+    if (SYSTEM_DATABASES.has(req.database)) {
+      throw new Error(`Refusing to drop system database "${req.database}"`)
+    }
+
+    await this.assertDatabaseExists(req.database)
+
+    await this.withServerConnection(async (connection) => {
+      await connection.query(`DROP DATABASE ${this.dialect.quoteIdent(req.database)}`)
+    })
+
+    await this.poolCache.removePool(req.database)
+  }
+
   async dropTable(req: DropTableRequest): Promise<void> {
     await this.assertSourceExists(req.database, req.table)
     await this.poolCache.withPool(req.database, async (pool) => {
@@ -369,6 +430,39 @@ export class MySQLDriver implements DbDriver {
   private async assertTargetAbsent(database: string, table: string): Promise<void> {
     if (await this.tableExists(database, table)) {
       throw new Error(`Table "${table}" already exists`)
+    }
+  }
+
+  private async databaseExists(database: string): Promise<boolean> {
+    return this.withServerConnection(async (connection) => {
+      const [rows] = await connection.query<RowDataPacket[]>(
+        `SELECT 1 AS present
+         FROM information_schema.SCHEMATA
+         WHERE SCHEMA_NAME = ?
+         LIMIT 1`,
+        [database]
+      )
+      return rows.length > 0
+    })
+  }
+
+  private async assertDatabaseExists(database: string): Promise<void> {
+    if (!(await this.databaseExists(database))) {
+      throw new Error(`Database "${database}" not found`)
+    }
+  }
+
+  private async withServerConnection<T>(run: (connection: Connection) => Promise<T>): Promise<T> {
+    const connection = await mysql.createConnection({
+      ...this.poolCache.buildPoolOptions(),
+      database: undefined,
+      multipleStatements: false
+    })
+
+    try {
+      return await run(connection)
+    } finally {
+      await connection.end()
     }
   }
 }

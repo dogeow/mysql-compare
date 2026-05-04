@@ -1,8 +1,19 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, FileCode2, Folder, GitCompareArrows, Search, SquareTerminal, Table as TableIcon, X } from 'lucide-react'
+import {
+  Database as DatabaseIcon,
+  Download,
+  FileCode2,
+  Folder,
+  GitCompareArrows,
+  Search,
+  SquareTerminal,
+  Table as TableIcon,
+  X
+} from 'lucide-react'
 import { Tabs } from '@renderer/components/ui/tabs'
 import { Button } from '@renderer/components/ui/button'
 import { DatabaseExportTaskView } from '@renderer/components/table-view/DatabaseExportTaskView'
+import { DatabaseInfoView } from '@renderer/components/table-view/DatabaseInfoView'
 import { TableDataView } from '@renderer/components/table-view/TableDataView'
 import { TableInfoView } from '@renderer/components/table-view/TableInfoView'
 import { TableStructureView } from '@renderer/components/table-view/TableStructureView'
@@ -12,18 +23,27 @@ import { SQLQueryView } from '@renderer/components/sql/SQLQueryView'
 import { SSHFileEditor } from '@renderer/components/ssh/SSHFileEditor'
 import { SSHFileManager } from '@renderer/components/ssh/SSHFileManager'
 import { SSHTerminalView } from '@renderer/components/ssh/SSHTerminalView'
-import { useUIStore, type WorkspaceTab, type WorkspaceView } from '@renderer/store/ui-store'
+import {
+  useUIStore,
+  type TableViewTabKind,
+  type WorkspaceTab,
+  type WorkspaceView
+} from '@renderer/store/ui-store'
 import { cn } from '@renderer/lib/utils'
 import { useI18n, type Translator } from '@renderer/i18n'
 
-type TableTabKind = 'data' | 'structure' | 'info'
-
-function isTableTabKind(value: string): value is TableTabKind {
+function isTableTabKind(value: string): value is TableViewTabKind {
   return value === 'data' || value === 'structure' || value === 'info'
 }
 
 function getTabDisplayTitle(view: WorkspaceView, t: Translator): string {
   if (view.kind === 'diff') return t('app.diffSync')
+  if (view.kind === 'database') {
+    const prefix = t('workspace.tabTitle.databasePrefix')
+    return view.connectionName
+      ? `${prefix} · ${view.database} @ ${view.connectionName}`
+      : `${prefix} · ${view.database}`
+  }
   if (view.kind === 'sql') {
     const prefix = t('workspace.tabTitle.sqlPrefix')
     return view.connectionName
@@ -66,7 +86,7 @@ export function Workspace() {
     moveTab
   } = useUIStore()
   const { t } = useI18n()
-  const [tableTabs, setTableTabs] = useState<Record<string, TableTabKind>>({})
+  const [tableTabs, setTableTabs] = useState<Record<string, TableViewTabKind>>({})
   const [tabMenu, setTabMenu] = useState<{ x: number; y: number; tabId: string } | null>(null)
   const [draggedTabId, setDraggedTabId] = useState<string | null>(null)
   const [dragOverTabId, setDragOverTabId] = useState<string | null>(null)
@@ -83,7 +103,7 @@ export function Workspace() {
       const alive = new Set(workspaceTabs.map((tab) => tab.id))
       const next = Object.fromEntries(
         Object.entries(current).filter(([tabId]) => alive.has(tabId))
-      ) as Record<string, TableTabKind>
+      ) as Record<string, TableViewTabKind>
 
       workspaceTabs.forEach((tab, index) => {
         const previousTab = previousTabs[index]
@@ -103,6 +123,22 @@ export function Workspace() {
       return next
     })
     previousTabsRef.current = workspaceTabs
+  }, [workspaceTabs])
+
+  useEffect(() => {
+    setTableTabs((current) => {
+      let changed = false
+      const next = { ...current }
+
+      workspaceTabs.forEach((tab) => {
+        if (tab.view.kind !== 'table' || !tab.view.tableTab) return
+        if (next[tab.id] === tab.view.tableTab) return
+        next[tab.id] = tab.view.tableTab
+        changed = true
+      })
+
+      return changed ? next : current
+    })
   }, [workspaceTabs])
 
   const activeTab = workspaceTabs.find((tab) => tab.id === activeTabId) ?? null
@@ -298,6 +334,8 @@ export function Workspace() {
               >
                 {tab.view.kind === 'diff' || tab.view.kind === 'table-compare' ? (
                   <GitCompareArrows className="h-3.5 w-3.5 shrink-0" />
+                ) : tab.view.kind === 'database' ? (
+                  <DatabaseIcon className="h-3.5 w-3.5 shrink-0" />
                 ) : tab.view.kind === 'sql' ? (
                   <FileCode2 className="h-3.5 w-3.5 shrink-0" />
                 ) : tab.view.kind === 'database-export' ? (
@@ -452,6 +490,8 @@ export function Workspace() {
                     >
                       {tab.view.kind === 'diff' || tab.view.kind === 'table-compare' ? (
                         <GitCompareArrows className="h-4 w-4 shrink-0" />
+                      ) : tab.view.kind === 'database' ? (
+                        <DatabaseIcon className="h-4 w-4 shrink-0" />
                       ) : tab.view.kind === 'sql' || tab.view.kind === 'ssh-editor' ? (
                         <FileCode2 className="h-4 w-4 shrink-0" />
                       ) : tab.view.kind === 'ssh-terminal' ? (
@@ -526,6 +566,35 @@ export function Workspace() {
                   connectionName={tab.view.connectionName}
                   remotePath={tab.view.path}
                 />
+              ) : tab.view.kind === 'database' ? (
+                <>
+                  <div className="border-b border-border bg-card/80 px-3 py-2 text-sm">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0 truncate">
+                        {tab.view.connectionName && (
+                          <span className="text-muted-foreground">{tab.view.connectionName}</span>
+                        )}
+                        {tab.view.connectionName && <span className="mx-1 text-muted-foreground">/</span>}
+                        <strong>{tab.view.database}</strong>
+                      </div>
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 shrink-0"
+                        onClick={() => closeTab(tab.id)}
+                        title={t('workspace.closeTab')}
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <div className="flex-1 overflow-hidden">
+                    <DatabaseInfoView
+                      connectionId={tab.view.connectionId}
+                      database={tab.view.database}
+                    />
+                  </div>
+                </>
               ) : (
                 <>
                   <div className="border-b border-border bg-card/80 px-3 py-2 text-sm">

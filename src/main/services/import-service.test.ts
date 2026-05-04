@@ -251,6 +251,14 @@ function createDriver(engine: 'mysql' | 'postgres'): {
     connectionId: engine === 'postgres' ? 'pg-conn' : 'mysql-conn',
     dialect: engine === 'postgres' ? pgDialect : mysqlDialect,
     listDatabases: async () => [],
+    getDatabaseInfo: async () => ({
+      name: 'unused',
+      tableCount: 0,
+      rowEstimate: 0,
+      dataLength: 0,
+      indexLength: 0,
+      totalSize: 0
+    }),
     listTables: async () => [],
     getTableSchema: async () => buildSchema(),
     queryRows: async () => ({ rows: [], total: 0 }),
@@ -259,6 +267,7 @@ function createDriver(engine: 'mysql' | 'postgres'): {
     deleteRows: async () => ({ affectedRows: 0 }),
     renameTable: async () => ({ table: '' }),
     copyTable: async () => ({ table: '' }),
+    dropDatabase: async () => undefined,
     dropTable: async () => undefined,
     executeSQL,
     streamRows: vi.fn(async function* () {

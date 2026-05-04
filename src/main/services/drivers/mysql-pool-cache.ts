@@ -120,6 +120,17 @@ export class MySQLPoolCache {
     await Promise.all(pools.map((pool) => pool.end().catch(() => undefined)))
   }
 
+  async removePool(database?: string): Promise<void> {
+    const key = database ?? this.connection.database ?? '__default__'
+
+    await this.runPoolMutation(async () => {
+      const entry = this.pools.get(key)
+      if (!entry) return
+      this.pools.delete(key)
+      await entry.pool.end().catch(() => undefined)
+    })
+  }
+
   private createLease(entry: PoolEntry): { pool: Pool; release: () => void } {
     let released = false
 

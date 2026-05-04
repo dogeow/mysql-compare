@@ -59,6 +59,7 @@ export const en = {
       closeAll: 'Close all tabs',
     },
     tabTitle: {
+      databasePrefix: 'Database',
       sqlPrefix: 'SQL',
       databaseExportPrefix: 'Export',
       comparePrefix: 'Compare',
@@ -84,12 +85,14 @@ export const en = {
     openSshTerminal: 'Open SSH terminal',
     exportDatabase: 'Export database {{database}}',
     confirm: {
+      dropDatabase: 'Drop database "{{database}}"? This removes all tables and cannot be undone.',
       copyTable: 'Copy "{{table}}" and its data to "{{targetTable}}"?',
       dropTable: 'Drop table "{{table}}"? This cannot be undone.',
       truncateTable: 'Truncate table "{{table}}"? All rows will be removed.',
       deleteConnection: 'Delete connection "{{name}}"?',
     },
     toast: {
+      droppedDatabase: 'Dropped database {{database}}',
       newTableNameRequired: 'New table name is required',
       renamedTo: 'Renamed to {{table}}',
       copiedTo: 'Copied to {{table}}',
@@ -98,6 +101,8 @@ export const en = {
       connectionDeleted: 'Connection deleted',
     },
     overlays: {
+      databaseDetails: 'Database Details',
+      tableDetails: 'Table Details',
       renameTable: 'Rename Table',
       renameDescription: 'Rename {{db}}.{{table}} to a new table name.',
       copyToCopy: 'Copy to {{table}}_copy',
@@ -562,6 +567,30 @@ export const en = {
     reviewBeforeExecute: 'Review the SQL before executing.',
     executing: 'Executing...',
     commentUpdated: 'Table comment updated',
+    dangerZone: 'Danger Zone',
+    dropTableDescription:
+      'Delete {{database}}.{{table}} permanently. This closes related tabs and cannot be undone.',
+    dropTable: 'Delete Table',
+    droppingTable: 'Deleting...'
+  },
+  databaseInfo: {
+    tables: 'Tables',
+    rows: 'Estimated Rows',
+    dataSize: 'Data Size',
+    indexSize: 'Index Size',
+    totalSize: 'Total Size',
+    freeSpace: 'Free Space',
+    charset: 'Charset',
+    collation: 'Collation',
+    owner: 'Owner',
+    comment: 'Database Comment',
+    visibleHint: 'Metadata reported by the connected database engine.',
+    noComment: 'No comment',
+    dangerZone: 'Danger Zone',
+    dropDatabaseDescription:
+      'Delete database {{database}} permanently. This closes related tabs and cannot be undone.',
+    dropDatabase: 'Delete Database',
+    droppingDatabase: 'Deleting...'
   },
   exportDialog: {
     title: 'Export Table',

@@ -61,6 +61,7 @@ export const zhCN: Dictionary = {
       closeAll: '关闭全部标签页',
     },
     tabTitle: {
+      databasePrefix: '数据库',
       sqlPrefix: 'SQL',
       databaseExportPrefix: '导出',
       comparePrefix: '对比',
@@ -86,12 +87,14 @@ export const zhCN: Dictionary = {
     openSshTerminal: '打开 SSH 终端',
     exportDatabase: '导出数据库 {{database}}',
     confirm: {
+      dropDatabase: '删除数据库 "{{database}}"？这会删除其中所有数据表，且不可恢复。',
       copyTable: '将 "{{table}}" 及其数据复制到 "{{targetTable}}"？',
       dropTable: '删除表 "{{table}}"？此操作不可恢复。',
       truncateTable: '清空表 "{{table}}"？所有行数据都会被删除。',
       deleteConnection: '删除连接 "{{name}}"？',
     },
     toast: {
+      droppedDatabase: '已删除数据库 {{database}}',
       newTableNameRequired: '请填写新表名',
       renamedTo: '已重命名为 {{table}}',
       copiedTo: '已复制为 {{table}}',
@@ -100,6 +103,8 @@ export const zhCN: Dictionary = {
       connectionDeleted: '连接已删除',
     },
     overlays: {
+      databaseDetails: '数据库详情',
+      tableDetails: '表详情',
       renameTable: '重命名表',
       renameDescription: '将 {{db}}.{{table}} 重命名为新表名。',
       copyToCopy: '复制为 {{table}}_copy',
@@ -554,6 +559,28 @@ export const zhCN: Dictionary = {
     reviewBeforeExecute: '执行前请检查 SQL。',
     executing: '执行中...',
     commentUpdated: '表注释已更新',
+    dangerZone: '危险操作',
+    dropTableDescription: '永久删除 {{database}}.{{table}}，并关闭相关标签页。此操作不可恢复。',
+    dropTable: '删除数据表',
+    droppingTable: '删除中...'
+  },
+  databaseInfo: {
+    tables: '数据表数量',
+    rows: '预估行数',
+    dataSize: '数据大小',
+    indexSize: '索引大小',
+    totalSize: '总大小',
+    freeSpace: '空闲空间',
+    charset: '字符集',
+    collation: '排序规则',
+    owner: '所有者',
+    comment: '数据库注释',
+    visibleHint: '由当前数据库引擎返回的数据库元信息。',
+    noComment: '无注释',
+    dangerZone: '危险操作',
+    dropDatabaseDescription: '永久删除数据库 {{database}}，并关闭相关标签页。此操作不可恢复。',
+    dropDatabase: '删除数据库',
+    droppingDatabase: '删除中...'
   },
   exportDialog: {
     title: '导出表',

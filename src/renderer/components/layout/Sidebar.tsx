@@ -52,10 +52,12 @@ export function Sidebar() {
   const {
     rightView,
     setRightView,
+    closeDatabaseTabs,
+    markDatabaseDropped,
     renameTableTabs,
-    closeTableTabs,
     refreshTableData,
-    markTableDropped,
+    latestDatabaseDropEvent,
+    latestTableDropEvent,
     showToast
   } = useUIStore()
   const { t } = useI18n()
@@ -78,6 +80,8 @@ export function Sidebar() {
   const treeScrollRef = useRef<HTMLDivElement | null>(null)
   const dbRowRefs = useRef<Record<string, DatabaseRowRefEntry>>({})
   const resizeStateRef = useRef<{ startX: number; startWidth: number } | null>(null)
+  const handledDatabaseDropEventIdRef = useRef(0)
+  const handledTableDropEventIdRef = useRef(0)
 
   useEffect(() => {
     refresh()
@@ -174,6 +178,68 @@ export function Sidebar() {
     }
   }, [])
 
+  useEffect(() => {
+    if (!latestDatabaseDropEvent) return
+    if (latestDatabaseDropEvent.id <= handledDatabaseDropEventIdRef.current) return
+
+    handledDatabaseDropEventIdRef.current = latestDatabaseDropEvent.id
+    setNodes((current) => {
+      const connectionNode = current[latestDatabaseDropEvent.connectionId]
+      if (!connectionNode?.databases?.includes(latestDatabaseDropEvent.database)) return current
+
+      const expandedDbs = new Set(connectionNode.expandedDbs)
+      expandedDbs.delete(latestDatabaseDropEvent.database)
+      const { [latestDatabaseDropEvent.database]: _removedTables, ...restTables } = connectionNode.tables
+
+      return {
+        ...current,
+        [latestDatabaseDropEvent.connectionId]: {
+          ...connectionNode,
+          databases: connectionNode.databases.filter(
+            (database) => database !== latestDatabaseDropEvent.database
+          ),
+          tables: restTables,
+          expandedDbs
+        }
+      }
+    })
+    setTableFilters((current) => {
+      const key = getDatabaseKey(
+        latestDatabaseDropEvent.connectionId,
+        latestDatabaseDropEvent.database
+      )
+      if (!(key in current)) return current
+      const { [key]: _removed, ...rest } = current
+      return rest
+    })
+  }, [latestDatabaseDropEvent])
+
+  useEffect(() => {
+    if (!latestTableDropEvent) return
+    if (latestTableDropEvent.id <= handledTableDropEventIdRef.current) return
+
+    handledTableDropEventIdRef.current = latestTableDropEvent.id
+    setNodes((current) => {
+      const connectionNode = current[latestTableDropEvent.connectionId]
+      const tables = connectionNode?.tables[latestTableDropEvent.database]
+      if (!connectionNode || !tables) return current
+      if (!tables.includes(latestTableDropEvent.table)) return current
+
+      return {
+        ...current,
+        [latestTableDropEvent.connectionId]: {
+          ...connectionNode,
+          tables: {
+            ...connectionNode.tables,
+            [latestTableDropEvent.database]: tables.filter(
+              (table) => table !== latestTableDropEvent.table
+            )
+          }
+        }
+      }
+    })
+  }, [latestTableDropEvent])
+
   const getDatabaseKey = (connectionId: string, database: string) => `${connectionId}:${database}`
 
   const getTableFilter = (connectionId: string, database: string) =>
@@ -201,6 +267,11 @@ export function Sidebar() {
     rightView.connectionId === connectionId &&
     rightView.database === database &&
     rightView.table === table
+
+  const isSelectedDatabase = (connectionId: string, database: string) =>
+    rightView.kind === 'database' &&
+    rightView.connectionId === connectionId &&
+    rightView.database === database
 
   const toggleConnection = async (conn: SafeConnection) => {
     const cur = nodes[conn.id]
@@ -283,6 +354,10 @@ export function Sidebar() {
     setRightView({ kind: 'sql', connectionId: conn.id, connectionName: conn.name, database: db })
   }
 
+  const openDatabaseDetails = (conn: SafeConnection, db: string) => {
+    setRightView({ kind: 'database', connectionId: conn.id, connectionName: conn.name, database: db })
+  }
+
   const openSSHFiles = (conn: SafeConnection) => {
     setRightView({ kind: 'ssh-files', connectionId: conn.id, connectionName: conn.name })
   }
@@ -317,7 +392,7 @@ export function Sidebar() {
     event.stopPropagation()
     setDatabaseMenu({
       x: Math.min(event.clientX, window.innerWidth - 232),
-      y: Math.min(event.clientY, window.innerHeight - 160),
+      y: Math.min(event.clientY, window.innerHeight - 208),
       connection: conn,
       database
     })
@@ -412,6 +487,17 @@ export function Sidebar() {
     })
   }
 
+  const openTableDetails = (menu: TableMenuState) => {
+    setTableMenu(null)
+    setRightView({
+      kind: 'table',
+      connectionId: menu.connection.id,
+      database: menu.database,
+      table: menu.table,
+      tableTab: 'info'
+    })
+  }
+
   const openExportDatabaseDialog = (connection: SafeConnection, database: string) => {
     setDatabaseMenu(null)
     setExportDatabaseDialog({
@@ -427,29 +513,6 @@ export function Sidebar() {
       database: menu.database,
       table: menu.table
     })
-  }
-
-  const dropTable = async (menu: TableMenuState) => {
-    setTableMenu(null)
-    if (!confirm(t('sidebar.confirm.dropTable', { table: menu.table }))) return
-    setActionBusy(true)
-    try {
-      await unwrap(
-        api.db.dropTable({
-          connectionId: menu.connection.id,
-          database: menu.database,
-          table: menu.table
-        })
-      )
-      await refreshDatabase(menu.connection, menu.database)
-      markTableDropped(menu.connection.id, menu.database, menu.table)
-      closeTableTabs(menu.connection.id, menu.database, menu.table)
-      showToast(t('sidebar.toast.droppedTable', { table: menu.table }), 'success')
-    } catch (err) {
-      showToast((err as Error).message, 'error')
-    } finally {
-      setActionBusy(false)
-    }
   }
 
   const truncateTable = async (menu: TableMenuState) => {
@@ -536,12 +599,14 @@ export function Sidebar() {
           treeScrollRef={treeScrollRef}
           dbRowRefs={dbRowRefs}
           getTableFilter={getTableFilter}
+          isSelectedDatabase={isSelectedDatabase}
           isSelectedTable={isSelectedTable}
           onToggleConnection={toggleConnection}
           onEditConnection={setEditing}
           onOpenSSHFiles={openSSHFiles}
           onOpenSSHTerminal={openSSHTerminal}
           onToggleDatabase={toggleDatabase}
+          onOpenDatabaseDetails={openDatabaseDetails}
           onOpenSQLConsole={openSQLConsole}
           onExportDatabase={openExportDatabaseDialog}
           onRefreshDatabase={refreshDatabase}
@@ -580,6 +645,10 @@ export function Sidebar() {
         onCloseTableMenu={() => setTableMenu(null)}
         databaseMenu={databaseMenu}
         onCloseDatabaseMenu={() => setDatabaseMenu(null)}
+        onOpenDatabaseDetails={(menu) => {
+          setDatabaseMenu(null)
+          openDatabaseDetails(menu.connection, menu.database)
+        }}
         onOpenDatabaseSQLConsole={(menu) => {
           setDatabaseMenu(null)
           openSQLConsole(menu.connection, menu.database)
@@ -589,13 +658,13 @@ export function Sidebar() {
           setDatabaseMenu(null)
           return refreshDatabase(menu.connection, menu.database)
         }}
+        onOpenTableDetails={openTableDetails}
         onRenameTable={openRenameDialog}
         onCopyTable={copyTable}
         onShowCreateSQL={showCreateSQL}
         onExportTable={openExportDialog}
         onImportTable={openImportDialog}
         onTruncateTable={truncateTable}
-        onDropTable={dropTable}
         renameDialog={renameDialog}
         renameDraft={renameDraft}
         actionBusy={actionBusy}

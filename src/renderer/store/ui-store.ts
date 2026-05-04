@@ -5,9 +5,18 @@ import type { ExportDatabaseRequest } from '../../shared/types'
 let toastTimer: ReturnType<typeof setTimeout> | null = null
 const tabCloseGuards = new Map<string, () => boolean>()
 
+export type TableViewTabKind = 'data' | 'structure' | 'info'
+
 export type RightView =
   | { kind: 'empty' }
-  | { kind: 'table'; connectionId: string; database: string; table: string }
+  | { kind: 'database'; connectionId: string; database: string; connectionName?: string }
+  | {
+      kind: 'table'
+      connectionId: string
+      database: string
+      table: string
+      tableTab?: TableViewTabKind
+    }
   | {
       kind: 'table-compare'
       compareSessionId: string
@@ -46,11 +55,18 @@ export interface TableDropEvent {
   table: string
 }
 
+export interface DatabaseDropEvent {
+  id: number
+  connectionId: string
+  database: string
+}
+
 interface UIState {
   rightView: RightView
   workspaceTabs: WorkspaceTab[]
   activeTabId: string | null
   tableReloadTokens: Record<string, number>
+  latestDatabaseDropEvent: DatabaseDropEvent | null
   latestTableDropEvent: TableDropEvent | null
   setRightView: (v: RightView) => void
   setActiveTab: (tabId: string) => void
@@ -61,10 +77,12 @@ interface UIState {
   moveTab: (tabId: string, targetTabId: string) => void
   registerTabCloseGuard: (tabId: string, guard: () => boolean) => () => void
   confirmSSHPathTabRetarget: (connectionId: string, oldPath: string) => boolean
+  closeDatabaseTabs: (connectionId: string, database: string) => void
   renameTableTabs: (connectionId: string, database: string, oldTable: string, newTable: string) => void
   closeTableTabs: (connectionId: string, database: string, table: string) => void
   moveSSHPathTabs: (connectionId: string, oldPath: string, newPath: string) => void
   refreshTableData: (connectionId: string, database: string, table: string) => void
+  markDatabaseDropped: (connectionId: string, database: string) => void
   markTableDropped: (connectionId: string, database: string, table: string) => void
   toast: { message: string; level: 'info' | 'error' | 'success' } | null
   showToast: (message: string, level?: 'info' | 'error' | 'success') => void
@@ -96,8 +114,20 @@ function compareViewReferencesTable(
   )
 }
 
+function compareViewReferencesDatabase(
+  view: Extract<WorkspaceView, { kind: 'table-compare' }>,
+  connectionId: string,
+  database: string
+): boolean {
+  return (
+    (view.sourceConnectionId === connectionId && view.sourceDatabase === database) ||
+    (view.targetConnectionId === connectionId && view.targetDatabase === database)
+  )
+}
+
 function getTabId(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'diff'
+  if (view.kind === 'database') return `database:${view.connectionId}:${view.database}`
   if (view.kind === 'sql') return `sql:${view.connectionId}:${view.database}`
   if (view.kind === 'database-export') return `database-export:${view.exportTaskId}`
   if (view.kind === 'ssh-files') return `ssh-files:${view.connectionId}`
@@ -115,6 +145,11 @@ function getTableReloadKey(connectionId: string, database: string, table: string
 
 function getTabTitle(view: WorkspaceView): string {
   if (view.kind === 'diff') return 'Diff & Sync'
+  if (view.kind === 'database') {
+    return view.connectionName
+      ? `Database · ${view.database} @ ${view.connectionName}`
+      : `Database · ${view.database}`
+  }
   if (view.kind === 'sql') {
     return view.connectionName
       ? `SQL · ${view.database} @ ${view.connectionName}`
@@ -182,6 +217,7 @@ export const useUIStore = create<UIState>((set) => ({
   workspaceTabs: [],
   activeTabId: null,
   tableReloadTokens: {},
+  latestDatabaseDropEvent: null,
   latestTableDropEvent: null,
   setRightView: (view) =>
     set((state) => {
@@ -301,6 +337,39 @@ export const useUIStore = create<UIState>((set) => ({
 
     return true
   },
+  closeDatabaseTabs: (connectionId, database) =>
+    set((state) => {
+      let removedActiveIndex = -1
+      let changed = false
+      const workspaceTabs = state.workspaceTabs.filter((tab, index) => {
+        const shouldRemove =
+          (tab.view.kind === 'database' &&
+            tab.view.connectionId === connectionId &&
+            tab.view.database === database) ||
+          (tab.view.kind === 'table' &&
+            tab.view.connectionId === connectionId &&
+            tab.view.database === database) ||
+          (tab.view.kind === 'sql' &&
+            tab.view.connectionId === connectionId &&
+            tab.view.database === database) ||
+          (tab.view.kind === 'table-compare' &&
+            compareViewReferencesDatabase(tab.view, connectionId, database))
+
+        if (!shouldRemove) return true
+
+        changed = true
+        if (tab.id === state.activeTabId) {
+          removedActiveIndex = index
+        }
+        return false
+      })
+
+      if (!changed) return state
+      if (removedActiveIndex < 0) {
+        return { ...state, workspaceTabs }
+      }
+      return { ...state, workspaceTabs, ...pickActiveState(workspaceTabs, removedActiveIndex - 1) }
+    }),
   renameTableTabs: (connectionId, database, oldTable, newTable) =>
     set((state) => {
       const oldTabId = getTabId({ kind: 'table', connectionId, database, table: oldTable })
@@ -433,6 +502,17 @@ export const useUIStore = create<UIState>((set) => ({
         tableReloadTokens: {
           ...state.tableReloadTokens,
           [key]: (state.tableReloadTokens[key] ?? 0) + 1
+        }
+      }
+    }),
+  markDatabaseDropped: (connectionId, database) =>
+    set((state) => {
+      return {
+        ...state,
+        latestDatabaseDropEvent: {
+          id: (state.latestDatabaseDropEvent?.id ?? 0) + 1,
+          connectionId,
+          database
         }
       }
     }),

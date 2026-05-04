@@ -1,7 +1,9 @@
 import { IPC } from '../../shared/ipc-channels'
 import type {
   CopyTableRequest,
+  DatabaseInfo,
   DeleteRowsRequest,
+  DropDatabaseRequest,
   DropTableRequest,
   ExportDatabaseRequest,
   ExportDatabaseResult,
@@ -27,6 +29,14 @@ export function registerDbIPC(): void {
     const driver = await dbService.getDriver(connectionId)
     return driver.listDatabases()
   })
+
+  handle(
+    IPC.GetDatabaseInfo,
+    async ({ connectionId, database }: { connectionId: string; database: string }): Promise<DatabaseInfo> => {
+      const driver = await dbService.getDriver(connectionId)
+      return driver.getDatabaseInfo(database)
+    }
+  )
 
   handle(
     IPC.ListTables,
@@ -71,6 +81,10 @@ export function registerDbIPC(): void {
   handle(IPC.CopyTable, async (req: CopyTableRequest) => {
     const driver = await dbService.getDriver(req.connectionId)
     return driver.copyTable(req)
+  })
+  handle(IPC.DropDatabase, async (req: DropDatabaseRequest) => {
+    const driver = await dbService.getDriver(req.connectionId)
+    return driver.dropDatabase(req)
   })
   handle(IPC.DropTable, async (req: DropTableRequest) => {
     const driver = await dbService.getDriver(req.connectionId)

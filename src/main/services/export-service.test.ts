@@ -415,6 +415,14 @@ function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]
     connectionId: 'mysql-conn',
     dialect: mysqlDialect,
     listDatabases: async () => [],
+    getDatabaseInfo: async () => ({
+      name: 'unused',
+      tableCount: 0,
+      rowEstimate: 0,
+      dataLength: 0,
+      indexLength: 0,
+      totalSize: 0
+    }),
     listTables,
     getTableSchema: async () => buildSchema(),
     queryRows: async () => ({ rows: [], total: 0 }),
@@ -423,6 +431,7 @@ function createMySQLDriver(options: { streamBatches: Record<string, unknown>[][]
     deleteRows: async () => ({ affectedRows: 0 }),
     renameTable: async () => ({ table: '' }),
     copyTable: async () => ({ table: '' }),
+    dropDatabase: async () => undefined,
     dropTable: async () => undefined,
     executeSQL: async () => undefined,
     streamRows,

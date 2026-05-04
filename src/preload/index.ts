@@ -4,9 +4,11 @@ import { IPC } from '../shared/ipc-channels'
 import type {
   ConnectionConfig,
   CopyTableRequest,
+  DatabaseInfo,
   DatabaseDiff,
   DiffRequest,
   DeleteRowsRequest,
+  DropDatabaseRequest,
   DropTableRequest,
   ExportDatabaseRequest,
   ExportDatabaseResult,
@@ -64,6 +66,8 @@ const api = {
   db: {
     listDatabases: (connectionId: string) =>
       invoke<string[]>(IPC.ListDatabases, { connectionId }),
+    getDatabaseInfo: (connectionId: string, database: string) =>
+      invoke<DatabaseInfo>(IPC.GetDatabaseInfo, { connectionId, database }),
     listTables: (connectionId: string, database: string) =>
       invoke<string[]>(IPC.ListTables, { connectionId, database }),
     queryRows: (req: QueryRowsRequest) => invoke<QueryRowsResult>(IPC.QueryRows, req),
@@ -74,6 +78,7 @@ const api = {
       invoke(IPC.ExecuteSQL, { connectionId, sql, database }),
     renameTable: (req: RenameTableRequest) => invoke<{ table: string }>(IPC.RenameTable, req),
     copyTable: (req: CopyTableRequest) => invoke<{ table: string }>(IPC.CopyTable, req),
+    dropDatabase: (req: DropDatabaseRequest) => invoke<void>(IPC.DropDatabase, req),
     dropTable: (req: DropTableRequest) => invoke<void>(IPC.DropTable, req),
     truncateTable: (req: TruncateTableRequest) => invoke<void>(IPC.TruncateTable, req),
     exportTable: (req: ExportTableRequest) => invoke<ExportTableResult>(IPC.ExportTable, req),

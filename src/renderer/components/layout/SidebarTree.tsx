@@ -1,5 +1,6 @@
 import { useMemo, type MouseEvent, type MutableRefObject } from 'react'
 import {
+  CircleEllipsis,
   ChevronDown,
   ChevronRight,
   Database,
@@ -33,12 +34,14 @@ interface SidebarTreeProps {
   treeScrollRef: MutableRefObject<HTMLDivElement | null>
   dbRowRefs: MutableRefObject<Record<string, DatabaseRowRefEntry>>
   getTableFilter: (connectionId: string, database: string) => string
+  isSelectedDatabase: (connectionId: string, database: string) => boolean
   isSelectedTable: (connectionId: string, database: string, table: string) => boolean
   onToggleConnection: (connection: SafeConnection) => void | Promise<void>
   onEditConnection: (connection: SafeConnection) => void
   onOpenSSHFiles: (connection: SafeConnection) => void
   onOpenSSHTerminal: (connection: SafeConnection) => void | Promise<void>
   onToggleDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
+  onOpenDatabaseDetails: (connection: SafeConnection, database: string) => void
   onOpenSQLConsole: (connection: SafeConnection, database: string) => void
   onExportDatabase: (connection: SafeConnection, database: string) => void
   onRefreshDatabase: (connection: SafeConnection, database: string) => void | Promise<void>
@@ -67,12 +70,14 @@ export function SidebarTree({
   treeScrollRef,
   dbRowRefs,
   getTableFilter,
+  isSelectedDatabase,
   isSelectedTable,
   onToggleConnection,
   onEditConnection,
   onOpenSSHFiles,
   onOpenSSHTerminal,
   onToggleDatabase,
+  onOpenDatabaseDetails,
   onOpenSQLConsole,
   onExportDatabase,
   onRefreshDatabase,
@@ -197,7 +202,10 @@ export function SidebarTree({
                               database
                             }
                           }}
-                          className="mx-1 flex items-center rounded-md hover:bg-accent focus-within:bg-accent/70"
+                          className={cn(
+                            'mx-1 flex items-center rounded-md hover:bg-accent focus-within:bg-accent/70',
+                            isSelectedDatabase(connection.id, database) && 'bg-accent text-foreground'
+                          )}
                           onContextMenu={(event) => onOpenDatabaseMenu(event, connection, database)}
                           title={t('sidebar.databaseRightClickHint')}
                         >
@@ -217,6 +225,16 @@ export function SidebarTree({
                           </button>
                           {dbExpanded && (
                             <div className="flex items-center pr-1">
+                              <button
+                                onClick={(event) => {
+                                  event.stopPropagation()
+                                  onOpenDatabaseDetails(connection, database)
+                                }}
+                                className="p-1 text-muted-foreground hover:text-foreground"
+                                title={t('sidebar.overlays.databaseDetails')}
+                              >
+                                <CircleEllipsis className="h-3 w-3" />
+                              </button>
                               <button
                                 onClick={(event) => {
                                   event.stopPropagation()

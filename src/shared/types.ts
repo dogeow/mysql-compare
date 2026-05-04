@@ -75,6 +75,20 @@ export interface TableSchema {
   updatedAt?: string | null
 }
 
+export interface DatabaseInfo {
+  name: string
+  tableCount: number
+  rowEstimate?: number
+  dataLength?: number
+  indexLength?: number
+  totalSize?: number
+  dataFree?: number
+  charset?: string
+  collation?: string
+  owner?: string
+  comment?: string
+}
+
 // ---------- 行查询 ----------
 export interface QueryRowsRequest {
   connectionId: string
@@ -139,6 +153,11 @@ export interface DropTableRequest {
   connectionId: string
   database: string
   table: string
+}
+
+export interface DropDatabaseRequest {
+  connectionId: string
+  database: string
 }
 
 export interface TruncateTableRequest {

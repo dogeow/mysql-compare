@@ -1,5 +1,5 @@
 import { vi } from 'vitest'
-import type { TableSchema } from '../../shared/types'
+import type { DatabaseInfo, TableSchema } from '../../shared/types'
 import type { DbDriver, Dialect } from './drivers/types'
 
 const fakeDialect: Dialect = {
@@ -11,6 +11,15 @@ const fakeDialect: Dialect = {
   renderTruncate: () => '',
   renderDropIfExists: () => '',
   stripDefiner: (sql) => sql
+}
+
+const fakeDatabaseInfo: DatabaseInfo = {
+  name: 'unused',
+  tableCount: 0,
+  rowEstimate: 0,
+  dataLength: 0,
+  indexLength: 0,
+  totalSize: 0
 }
 
 export function createFakeDriver(options: {
@@ -53,6 +62,7 @@ export function createFakeDriver(options: {
     connectionId: options.connectionId,
     dialect: fakeDialect,
     listDatabases: async () => [],
+    getDatabaseInfo: async () => fakeDatabaseInfo,
     listTables,
     getTableSchema,
     queryRows: async () => ({ rows: [], total: 0 }),
@@ -61,6 +71,7 @@ export function createFakeDriver(options: {
     deleteRows: async () => ({ affectedRows: 0 }),
     renameTable: async () => ({ table: '' }),
     copyTable: async () => ({ table: '' }),
+    dropDatabase: async () => undefined,
     dropTable: async () => undefined,
     executeSQL: async () => undefined,
     streamRows,
