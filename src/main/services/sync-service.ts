@@ -1,7 +1,5 @@
 // 同步：根据 SyncRequest 生成 SQL 计划，可 dry-run（仅返回 SQL）或真实执行。
 // 所有方言相关的 DDL / 字面量格式化都委托给目标 driver 的 Dialect。
-import { BrowserWindow } from 'electron'
-import { IPC } from '../../shared/ipc-channels'
 import type {
   SyncPlan,
   SyncProgressEvent,
@@ -34,6 +32,10 @@ interface SyncContext {
   crossEngine: boolean
 }
 
+interface ExecuteSyncOptions {
+  onProgress?: (event: SyncProgressEvent) => void
+}
+
 export class SyncService {
   /** 生成同步计划（不执行） */
   async buildPlan(req: SyncRequest): Promise<SyncPlan> {
@@ -57,9 +59,13 @@ export class SyncService {
   }
 
   /** 真实执行：在目标库依次跑 SQL，并通过 SyncProgress 事件汇报进度 */
-  async execute(req: SyncRequest): Promise<{ executed: number; errors: number }> {
-    const win = BrowserWindow.getAllWindows()[0]
-    const emit = (e: SyncProgressEvent) => win?.webContents.send(IPC.SyncProgress, e)
+  async execute(
+    req: SyncRequest,
+    options: ExecuteSyncOptions = {}
+  ): Promise<{ executed: number; errors: number }> {
+    const emit = (event: SyncProgressEvent) => {
+      options.onProgress?.(event)
+    }
     const context = await this.loadSyncContext(req)
 
     let executed = 0

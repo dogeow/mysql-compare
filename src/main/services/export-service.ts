@@ -1,11 +1,11 @@
 import { open, type FileHandle } from 'node:fs/promises'
 import { spawn } from 'node:child_process'
 import { dirname, extname, join } from 'node:path'
-import { BrowserWindow, dialog } from 'electron'
 import { schemaService } from './schema-service'
 import { dbService } from './db-service'
 import { sshService } from './ssh-service'
 import { connectionStore } from '../store/connection-store'
+import { showSaveDialog } from '../platform/electron-runtime'
 import type { DbDriver } from './drivers/types'
 import { mysqlDialect } from './drivers/mysql-dialect'
 import { pgDialect, renderPgCreateTable } from './drivers/pg-dialect'
@@ -60,15 +60,24 @@ async function openExportWriter(filePath: string): Promise<BufferedExportWriter>
   return new BufferedExportWriter(await open(filePath, 'w'))
 }
 
+interface ExportTargetOptions {
+  filePath?: string
+}
+
 export class ExportService {
-  async exportDatabase(req: ExportDatabaseRequest): Promise<ExportDatabaseResult> {
+  async exportDatabase(
+    req: ExportDatabaseRequest,
+    options: ExportTargetOptions = {}
+  ): Promise<ExportDatabaseResult> {
     this.validateDatabase(req)
 
     const driver = await dbService.getDriver(req.connectionId)
     const sqlDialect = resolveSqlDialect(req.sqlDialect, driver.engine)
     assertSqlDialectSupported(driver.engine, sqlDialect)
     const tables = await driver.listTables(req.database)
-    const filePath = await this.pickDatabaseFilePath(req, sqlDialect)
+    const filePath = options.filePath
+      ? normalizeExtension(options.filePath, 'sql')
+      : await this.pickDatabaseFilePath(req, sqlDialect)
     if (!filePath) {
       return { canceled: true, tablesExported: 0, rowsExported: 0 }
     }
@@ -135,7 +144,7 @@ export class ExportService {
     return { canceled: false, filePath, tablesExported: tables.length, rowsExported }
   }
 
-  async exportTable(req: ExportTableRequest): Promise<ExportTableResult> {
+  async exportTable(req: ExportTableRequest, options: ExportTargetOptions = {}): Promise<ExportTableResult> {
     this.validate(req)
 
     const driver = await dbService.getDriver(req.connectionId)
@@ -143,7 +152,10 @@ export class ExportService {
     const sqlDialect = resolveSqlDialect(req.sqlDialect, driver.engine)
     assertSqlDialectSupported(driver.engine, sqlDialect)
     this.validateQueryOptions(req, schema.columns)
-    const filePath = await this.pickFilePath(req, sqlDialect)
+    const extension = req.format === 'sql' ? 'sql' : req.format
+    const filePath = options.filePath
+      ? normalizeExtension(options.filePath, extension)
+      : await this.pickFilePath(req, sqlDialect)
     if (!filePath) {
       return { canceled: true, rowsExported: 0 }
     }
@@ -335,7 +347,6 @@ export class ExportService {
   }
 
   private async pickFilePath(req: ExportTableRequest, sqlDialect: DbEngine): Promise<string | null> {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const extension = req.format === 'sql' ? 'sql' : req.format
     const formatName = req.format === 'sql' ? `${sqlDialect.toUpperCase()} SQL` : req.format === 'txt' ? 'Text' : req.format.toUpperCase()
     const dialectSuffix = req.format === 'sql' ? `.${sqlDialect}` : ''
@@ -347,15 +358,12 @@ export class ExportService {
         { name: 'All Files', extensions: ['*'] }
       ]
     }
-    const response = win
-      ? await dialog.showSaveDialog(win, options)
-      : await dialog.showSaveDialog(options)
+    const response = await showSaveDialog(options)
     if (response.canceled || !response.filePath) return null
     return normalizeExtension(response.filePath, extension)
   }
 
   private async pickDatabaseFilePath(req: ExportDatabaseRequest, sqlDialect: DbEngine): Promise<string | null> {
-    const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
     const options = {
       title: `Export ${req.database}`,
       defaultPath: sanitizeFileName(`${req.database}.${sqlDialect}.sql`),
@@ -364,9 +372,7 @@ export class ExportService {
         { name: 'All Files', extensions: ['*'] }
       ]
     }
-    const response = win
-      ? await dialog.showSaveDialog(win, options)
-      : await dialog.showSaveDialog(options)
+    const response = await showSaveDialog(options)
     if (response.canceled || !response.filePath) return null
     return normalizeExtension(response.filePath, 'sql')
   }

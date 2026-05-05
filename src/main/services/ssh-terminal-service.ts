@@ -91,6 +91,12 @@ class SSHTerminalService {
     this.cleanupSession(req.sessionId)
   }
 
+  closeAll(): void {
+    for (const sessionId of Array.from(this.sessions.keys())) {
+      this.cleanupSession(sessionId)
+    }
+  }
+
   private getSession(sessionId: string): TerminalSession {
     const session = this.sessions.get(sessionId)
     if (!session || session.closed) throw new Error(`SSH terminal session ${sessionId} not found`)

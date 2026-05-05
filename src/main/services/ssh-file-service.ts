@@ -1,9 +1,10 @@
-import { BrowserWindow, dialog, type OpenDialogOptions, type SaveDialogOptions } from 'electron'
+import type { OpenDialogOptions, SaveDialogOptions } from 'electron'
 import { createHash } from 'node:crypto'
 import { mkdir as mkdirLocal, readdir as readdirLocal } from 'node:fs/promises'
 import { basename, join, posix } from 'node:path'
 import { Client, type ConnectConfig, type SFTPWrapper, type VerifyCallback } from 'ssh2'
 import { connectionStore } from '../store/connection-store'
+import { isElectronRuntime, showMessageBox, showOpenDialog, showSaveDialog } from '../platform/electron-runtime'
 import { sshHostKeyStore } from '../store/ssh-host-key-store'
 import type {
   ConnectionConfig,
@@ -37,6 +38,11 @@ interface SFTPListItem {
     isFile: () => boolean
     isSymbolicLink: () => boolean
   }
+}
+
+interface BrowserUploadFile {
+  relativePath: string
+  contentBase64: string
 }
 
 class SSHFileService {
@@ -123,6 +129,46 @@ class SSHFileService {
     return { canceled: false, remotePath: remoteDir }
   }
 
+  async uploadBrowserFiles(req: {
+    connectionId: string
+    remoteDir: string
+    files: BrowserUploadFile[]
+  }): Promise<SSHFileOperationResult> {
+    this.validateConnectionId(req.connectionId)
+    const remoteDir = normalizeRemotePath(req.remoteDir)
+    const files = normalizeBrowserUploadFiles(req.files)
+    if (files.length === 0) throw new Error('No upload files provided')
+
+    await this.withSFTP(req.connectionId, async (sftp) => {
+      const remoteDirectories = collectBrowserUploadDirectories(files)
+      for (const relativePath of remoteDirectories) {
+        const remotePath = joinRemotePath(remoteDir, relativePath)
+        const kind = await getRemotePathKind(sftp, remotePath)
+        if (kind === 'file') {
+          throw new Error(`Cannot create directory over existing file: ${remotePath}`)
+        }
+      }
+
+      for (const file of files) {
+        const remotePath = joinRemotePath(remoteDir, file.relativePath)
+        if ((await getRemotePathKind(sftp, remotePath)) !== 'missing') {
+          throw new Error(`Destination already exists: ${remotePath}`)
+        }
+      }
+
+      for (const relativePath of remoteDirectories) {
+        await ensureRemoteDirectory(sftp, joinRemotePath(remoteDir, relativePath))
+      }
+
+      for (const file of files) {
+        const remotePath = joinRemotePath(remoteDir, file.relativePath)
+        await writeBuffer(sftp, remotePath, Buffer.from(file.contentBase64, 'base64'))
+      }
+    })
+
+    return { canceled: false, remotePath: remoteDir }
+  }
+
   async downloadFile(req: SSHDownloadFileRequest): Promise<SSHFileOperationResult> {
     this.validateConnectionId(req.connectionId)
     const remotePath = normalizeRemotePath(req.remotePath)
@@ -132,6 +178,16 @@ class SSHFileService {
     await this.withSFTP(req.connectionId, (sftp) => fastGet(sftp, remotePath, localPath))
 
     return { canceled: false, localPath, remotePath }
+  }
+
+  async downloadFileContent(req: SSHDownloadFileRequest): Promise<{ fileName: string; content: Buffer }> {
+    this.validateConnectionId(req.connectionId)
+    const remotePath = normalizeRemotePath(req.remotePath)
+
+    return this.withSFTP(req.connectionId, async (sftp) => ({
+      fileName: posix.basename(remotePath) || 'download',
+      content: await readFileBuffer(sftp, remotePath)
+    }))
   }
 
   async downloadDirectory(req: SSHDownloadDirectoryRequest): Promise<SSHFileOperationResult> {
@@ -321,7 +377,12 @@ async function verifyHostFingerprint(conn: ConnectionConfig, fingerprint: string
   const saved = sshHostKeyStore.get(conn.id, host, port)
   if (saved) return saved === fingerprint
 
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!isElectronRuntime()) {
+    console.warn(`[ssh-file-service] auto-trusting SSH host fingerprint for ${host}:${port} in web runtime.`)
+    sshHostKeyStore.set(conn.id, host, port, fingerprint)
+    return true
+  }
+
   const options = {
     type: 'warning' as const,
     buttons: ['Trust Host', 'Cancel'],
@@ -331,7 +392,7 @@ async function verifyHostFingerprint(conn: ConnectionConfig, fingerprint: string
     message: `Trust SSH host ${host}:${port}?`,
     detail: `Fingerprint: ${fingerprint}`
   }
-  const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+  const result = await showMessageBox(options)
   if (result.response !== 0) return false
 
   sshHostKeyStore.set(conn.id, host, port, fingerprint)
@@ -438,9 +499,30 @@ function readFile(sftp: SFTPWrapper, remotePath: string): Promise<string> {
   })
 }
 
+function readFileBuffer(sftp: SFTPWrapper, remotePath: string): Promise<Buffer> {
+  return new Promise((resolve, reject) => {
+    sftp.readFile(remotePath, (error, data) => {
+      if (error) {
+        reject(error)
+        return
+      }
+      resolve(Buffer.from(data))
+    })
+  })
+}
+
 function writeFile(sftp: SFTPWrapper, remotePath: string, content: string): Promise<void> {
   return new Promise((resolve, reject) => {
     sftp.writeFile(remotePath, content, 'utf8', (error) => {
+      if (error) reject(error)
+      else resolve()
+    })
+  })
+}
+
+function writeBuffer(sftp: SFTPWrapper, remotePath: string, content: Buffer): Promise<void> {
+  return new Promise((resolve, reject) => {
+    sftp.writeFile(remotePath, content, (error) => {
       if (error) reject(error)
       else resolve()
     })
@@ -487,6 +569,35 @@ function normalizeUploadEntries(entries: SSHUploadEntriesRequest['entries']): SS
   }
 
   return normalizedEntries
+}
+
+function normalizeBrowserUploadFiles(files: BrowserUploadFile[]): BrowserUploadFile[] {
+  const seen = new Set<string>()
+  const normalizedFiles: BrowserUploadFile[] = []
+
+  for (const file of files) {
+    const relativePath = normalizeRelativeUploadPath(file.relativePath)
+    if (!file.contentBase64) throw new Error(`Upload content is required: ${relativePath}`)
+    if (seen.has(relativePath)) continue
+    seen.add(relativePath)
+    normalizedFiles.push({ relativePath, contentBase64: file.contentBase64 })
+  }
+
+  return normalizedFiles
+}
+
+function collectBrowserUploadDirectories(files: BrowserUploadFile[]): string[] {
+  const directories = new Set<string>()
+
+  for (const file of files) {
+    let parentPath = posix.dirname(file.relativePath)
+    while (parentPath && parentPath !== '.') {
+      directories.add(parentPath)
+      parentPath = posix.dirname(parentPath)
+    }
+  }
+
+  return Array.from(directories).sort((left, right) => getPathDepth(left) - getPathDepth(right))
 }
 
 function normalizeRelativeUploadPath(value: string): string {
@@ -604,32 +715,29 @@ function formatPermissions(mode: number): string {
 }
 
 async function pickOpenFilePath(): Promise<string | undefined> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const options: OpenDialogOptions = {
     title: 'Upload File',
     properties: ['openFile']
   }
-  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  const result = await showOpenDialog(options)
   return result.canceled ? undefined : result.filePaths[0]
 }
 
 async function pickSaveFilePath(defaultPath: string): Promise<string | undefined> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const options: SaveDialogOptions = {
     title: 'Download File',
     defaultPath
   }
-  const result = win ? await dialog.showSaveDialog(win, options) : await dialog.showSaveDialog(options)
+  const result = await showSaveDialog(options)
   return result.canceled ? undefined : result.filePath
 }
 
 async function pickDirectoryPath(title: string): Promise<string | undefined> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const options: OpenDialogOptions = {
     title,
     properties: ['openDirectory', 'createDirectory']
   }
-  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  const result = await showOpenDialog(options)
   return result.canceled ? undefined : result.filePaths[0]
 }
 

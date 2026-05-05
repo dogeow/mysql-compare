@@ -5,5 +5,9 @@ import { handle } from './_wrap'
 
 export function registerSyncIPC(): void {
   handle(IPC.BuildSyncPlan, (req: SyncRequest) => syncService.buildPlan(req))
-  handle(IPC.ExecuteSync, (req: SyncRequest) => syncService.execute(req))
+  handle(IPC.ExecuteSync, (req: SyncRequest, event) =>
+    syncService.execute(req, {
+      onProgress: (progress) => event.sender.send(IPC.SyncProgress, progress)
+    })
+  )
 }

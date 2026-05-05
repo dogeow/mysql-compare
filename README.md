@@ -26,6 +26,29 @@ npm install
 npm run dev
 ```
 
+## Web Mode
+
+Browser deployment is now supported with a standalone web API server plus a Vite-built frontend.
+
+Local development:
+
+```bash
+# terminal 1
+npm run web:server
+
+# terminal 2
+npm run web:dev
+```
+
+Production build:
+
+```bash
+npm run web:build
+npm run web:start
+```
+
+Detailed deployment steps and environment variables are documented in [docs/web-deployment.md](docs/web-deployment.md).
+
 ## Build
 
 ```bash

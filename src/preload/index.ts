@@ -108,12 +108,16 @@ const api = {
     onTerminalData: (cb: (event: SSHTerminalDataEvent) => void) => {
       const listener = (_: IpcRendererEvent, event: SSHTerminalDataEvent) => cb(event)
       ipcRenderer.on(IPC.SSHTerminalData, listener)
-      return () => ipcRenderer.off(IPC.SSHTerminalData, listener)
+      return () => {
+        ipcRenderer.off(IPC.SSHTerminalData, listener)
+      }
     },
     onTerminalExit: (cb: (event: SSHTerminalExitEvent) => void) => {
       const listener = (_: IpcRendererEvent, event: SSHTerminalExitEvent) => cb(event)
       ipcRenderer.on(IPC.SSHTerminalExit, listener)
-      return () => ipcRenderer.off(IPC.SSHTerminalExit, listener)
+      return () => {
+        ipcRenderer.off(IPC.SSHTerminalExit, listener)
+      }
     }
   },
   system: {

@@ -4,6 +4,7 @@ import Store from 'electron-store'
 import { v4 as uuid } from 'uuid'
 import type { ConnectionConfig, SafeConnection } from '../../shared/types'
 import { decryptSecret, encryptSecret } from './secure-store'
+import { createStoreOptions } from './store-config'
 
 interface StoredConnection extends Omit<ConnectionConfig,
   'password' | 'sshPassword' | 'sshPrivateKey' | 'sshPassphrase'> {
@@ -17,10 +18,7 @@ interface Schema {
   connections: StoredConnection[]
 }
 
-const store = new Store<Schema>({
-  name: 'connections',
-  defaults: { connections: [] }
-})
+const store = new Store<Schema>(createStoreOptions<Schema>('connections', { connections: [] }))
 
 function toStored(c: ConnectionConfig): StoredConnection {
   return {

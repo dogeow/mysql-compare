@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { BrowserWindow, dialog, type FileFilter, type OpenDialogOptions } from 'electron'
+import type { FileFilter, OpenDialogOptions } from 'electron'
 import type {
   ColumnInfo,
   ImportFormat,
@@ -9,6 +9,7 @@ import type {
 } from '../../shared/types'
 import { dbService } from './db-service'
 import type { DbDriver } from './drivers/types'
+import { isElectronRuntime, showMessageBox, showOpenDialog } from '../platform/electron-runtime'
 import { schemaService } from './schema-service'
 
 type ImportRowValue = string | null
@@ -106,19 +107,19 @@ async function importDelimited(
 }
 
 async function pickFilePath(format: ImportFormat): Promise<string | undefined> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
   const options: OpenDialogOptions = {
     title: 'Import Table',
     properties: ['openFile'],
     filters: [getFileFilter(format), { name: 'All Files', extensions: ['*'] }]
   }
-  const result = win ? await dialog.showOpenDialog(win, options) : await dialog.showOpenDialog(options)
+  const result = await showOpenDialog(options)
 
   return result.canceled ? undefined : result.filePaths[0]
 }
 
 async function confirmSQLImport(filePath: string, database: string): Promise<boolean> {
-  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  if (!isElectronRuntime()) return true
+
   const options = {
     type: 'warning' as const,
     buttons: ['Import', 'Cancel'],
@@ -128,7 +129,7 @@ async function confirmSQLImport(filePath: string, database: string): Promise<boo
     message: `Execute this SQL file against ${database}?`,
     detail: filePath
   }
-  const result = win ? await dialog.showMessageBox(win, options) : await dialog.showMessageBox(options)
+  const result = await showMessageBox(options)
   return result.response === 0
 }
 
