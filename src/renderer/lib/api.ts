@@ -1,5 +1,5 @@
 // 渲染端 IPC 入口：从 preload 暴露的 window.api 读取强类型方法。
-import type { AppAPI } from '../../preload'
+import type { AppAPI } from '../../shared/app-api'
 import type { IPCResult } from '../../shared/types'
 import { createWebApi } from './web-api'
 import { isElectronRenderer } from './runtime'
@@ -18,4 +18,3 @@ export async function unwrap<T>(p: Promise<IPCResult<T>>): Promise<T> {
   if (!r.ok) throw new Error(r.error || 'IPC error')
   return r.data as T
 }
-

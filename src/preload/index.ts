@@ -1,6 +1,7 @@
 // Preload：唯一允许调用 ipcRenderer 的地方。通过 contextBridge 把强类型 API 暴露给 renderer。
 import { contextBridge, ipcRenderer, IpcRendererEvent, webUtils } from 'electron'
 import { IPC } from '../shared/ipc-channels'
+import type { AppAPI } from '../shared/app-api'
 import type {
   ConnectionConfig,
   CopyTableRequest,
@@ -57,6 +58,13 @@ const invoke = <T,>(channel: string, payload?: unknown): Promise<IPCResult<T>> =
   ipcRenderer.invoke(channel, payload)
 
 const api = {
+  runtime: {
+    mode: 'electron',
+    supportsNativeFilePicker: true,
+    supportsDirectoryUpload: true,
+    supportsTerminalStreaming: true,
+    supportsDownload: true
+  },
   connection: {
     list: () => invoke<SafeConnection[]>(IPC.ConnectionList),
     upsert: (conn: ConnectionConfig) => invoke<SafeConnection>(IPC.ConnectionUpsert, conn),
@@ -138,8 +146,8 @@ const api = {
       }
     }
   }
-}
-
-export type AppAPI = typeof api
+} satisfies AppAPI
 
 contextBridge.exposeInMainWorld('api', api)
+
+export type { AppAPI }

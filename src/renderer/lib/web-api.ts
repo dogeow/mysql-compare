@@ -1,4 +1,4 @@
-import type { AppAPI } from '../../preload'
+import type { AppAPI } from '../../shared/app-api'
 import type {
   ConnectionConfig,
   CopyTableRequest,
@@ -313,6 +313,13 @@ async function uploadBrowserFiles(
 
 export function createWebApi(): AppAPI {
   return {
+    runtime: {
+      mode: 'web',
+      supportsNativeFilePicker: false,
+      supportsDirectoryUpload: true,
+      supportsTerminalStreaming: true,
+      supportsDownload: true
+    },
     connection: {
       list: () => get<SafeConnection[]>('/connections'),
       upsert: (conn: ConnectionConfig) => post<SafeConnection>('/connections', conn),
