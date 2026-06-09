@@ -132,6 +132,11 @@ export function ConnectionDialogForm({
               className="hidden"
               onChange={onSSHKeyInputChange}
             />
+            {form.sshPrivateKeyPath ? (
+              <p className="mb-2 truncate text-xs text-muted-foreground" title={form.sshPrivateKeyPath}>
+                {t('connection.form.sshKeyPath', { path: form.sshPrivateKeyPath })}
+              </p>
+            ) : null}
             <div
               className={
                 draggingSSHKey

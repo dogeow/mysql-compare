@@ -38,6 +38,7 @@ function toStored(c: ConnectionConfig): StoredConnection {
     sshHost: c.sshHost,
     sshPort: c.sshPort,
     sshUsername: c.sshUsername,
+    sshPrivateKeyPath: c.sshPrivateKeyPath,
     createdAt: c.createdAt || Date.now(),
     updatedAt: Date.now(),
     passwordCipher: encryptSecret(c.password),
@@ -61,6 +62,7 @@ function toSafe(s: StoredConnection): SafeConnection {
     sshHost: s.sshHost,
     sshPort: s.sshPort,
     sshUsername: s.sshUsername,
+    sshPrivateKeyPath: s.sshPrivateKeyPath,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     hasPassword: !!s.passwordCipher,
@@ -89,6 +91,7 @@ function toFull(s: StoredConnection): ConnectionConfig {
     sshHost: s.sshHost,
     sshPort: s.sshPort,
     sshUsername: s.sshUsername,
+    sshPrivateKeyPath: s.sshPrivateKeyPath,
     createdAt: s.createdAt,
     updatedAt: s.updatedAt,
     password: decryptSecret(s.passwordCipher) ?? undefined,
@@ -135,6 +138,7 @@ export const connectionStore = {
       if (conn.sshPassword === undefined) next.sshPasswordCipher = prev.sshPasswordCipher
       if (conn.sshPrivateKey === undefined) next.sshPrivateKeyCipher = prev.sshPrivateKeyCipher
       if (conn.sshPassphrase === undefined) next.sshPassphraseCipher = prev.sshPassphraseCipher
+      if (conn.sshPrivateKeyPath === undefined) next.sshPrivateKeyPath = prev.sshPrivateKeyPath
       next.createdAt = prev.createdAt
       list[idx] = next
     } else {

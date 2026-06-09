@@ -239,6 +239,7 @@ export const en = {
       sshPasswordKeep: 'SSH Password (leave blank to keep)',
       sshPrivateKey: 'SSH Private Key',
       sshPrivateKeyKeep: 'SSH Private Key (leave blank to keep)',
+      sshKeyPath: 'Key file: {{path}}',
       dropKeyHint: 'Drop a private key file here, or choose a file.',
       chooseFile: 'Choose File',
       keyPassphrase: 'Key Passphrase',

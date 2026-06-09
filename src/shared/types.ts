@@ -22,6 +22,8 @@ export interface ConnectionConfig {
   sshUsername?: string
   sshPassword?: string
   sshPrivateKey?: string
+  /** 本地私钥文件路径（非敏感，用于编辑时展示与校验） */
+  sshPrivateKeyPath?: string
   sshPassphrase?: string
   createdAt: number
   updatedAt: number

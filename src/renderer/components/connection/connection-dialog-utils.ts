@@ -1,5 +1,10 @@
 import type { ConnectionConfig, DbEngine, SafeConnection } from '../../../shared/types'
 
+export interface ValidateConnectionOptions {
+  hasSSHPassword?: boolean
+  hasSSHPrivateKey?: boolean
+}
+
 export const DEFAULT_PORT: Record<DbEngine, number> = {
   mysql: 3306,
   postgres: 5432,
@@ -30,6 +35,7 @@ export function createInitialForm(connection?: SafeConnection | null): Connectio
     sshUsername: connection?.sshUsername || '',
     sshPassword: '',
     sshPrivateKey: '',
+    sshPrivateKeyPath: connection?.sshPrivateKeyPath || '',
     sshPassphrase: '',
     createdAt: connection?.createdAt || 0,
     updatedAt: 0
@@ -49,11 +55,15 @@ export function buildPayload(form: ConnectionConfig): ConnectionConfig {
     password: form.password ? form.password : undefined,
     sshPassword: form.useSSH && form.sshPassword ? form.sshPassword : undefined,
     sshPrivateKey: form.useSSH && form.sshPrivateKey?.trim() ? form.sshPrivateKey.trim() : undefined,
+    sshPrivateKeyPath: form.useSSH ? form.sshPrivateKeyPath?.trim() || undefined : undefined,
     sshPassphrase: form.useSSH && form.sshPassphrase ? form.sshPassphrase : undefined
   }
 }
 
-export function validateConnectionForm(form: ConnectionConfig): string | null {
+export function validateConnectionForm(
+  form: ConnectionConfig,
+  options?: ValidateConnectionOptions
+): string | null {
   if (!form.name.trim()) return 'Name is required'
   if (!form.host.trim()) return 'Host is required'
   if (form.engine !== 'redis' && !form.username.trim()) return 'Username is required'
@@ -65,8 +75,11 @@ export function validateConnectionForm(form: ConnectionConfig): string | null {
   if (!form.sshUsername?.trim()) return 'SSH username is required when SSH tunnel is enabled'
   if (!isValidPort(form.sshPort)) return 'SSH port must be between 1 and 65535'
 
-  const hasSSHPassword = Boolean(form.sshPassword?.trim())
-  const hasSSHKey = Boolean(form.sshPrivateKey?.trim())
+  const hasSSHPassword = Boolean(form.sshPassword?.trim()) || Boolean(options?.hasSSHPassword)
+  const hasSSHKey =
+    Boolean(form.sshPrivateKey?.trim()) ||
+    Boolean(options?.hasSSHPrivateKey) ||
+    Boolean(form.sshPrivateKeyPath?.trim())
   if (!hasSSHPassword && !hasSSHKey) {
     return 'SSH password or private key is required when SSH tunnel is enabled'
   }

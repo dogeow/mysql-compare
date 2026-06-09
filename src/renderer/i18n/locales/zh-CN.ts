@@ -241,6 +241,7 @@ export const zhCN: Dictionary = {
       sshPasswordKeep: 'SSH 密码（留空保持不变）',
       sshPrivateKey: 'SSH 私钥',
       sshPrivateKeyKeep: 'SSH 私钥（留空保持不变）',
+      sshKeyPath: '私钥文件：{{path}}',
       dropKeyHint: '将私钥文件拖到此处，或选择文件。',
       chooseFile: '选择文件',
       keyPassphrase: '私钥口令',

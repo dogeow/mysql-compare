@@ -55,6 +55,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved, onDe
           sshUsername: '',
           sshPassword: '',
           sshPrivateKey: '',
+          sshPrivateKeyPath: '',
           sshPassphrase: ''
         }
       }
@@ -72,10 +73,21 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved, onDe
     })
   }
 
+  const validationOptions = {
+    hasSSHPassword: connection?.hasSSHPassword,
+    hasSSHPrivateKey: connection?.hasSSHPrivateKey
+  }
+
   const loadSSHKeyFile = async (file: File) => {
     try {
       const content = await file.text()
-      update('sshPrivateKey', content)
+      const filePath = (file as File & { path?: string }).path?.trim() || file.name
+      setTestFeedback(null)
+      setForm((current) => ({
+        ...current,
+        sshPrivateKey: content,
+        sshPrivateKeyPath: filePath
+      }))
       showToast(t('connection.sshKeyLoaded', { name: file.name }), 'success')
     } catch {
       showToast(t('connection.sshKeyReadFailed'), 'error')
@@ -96,7 +108,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved, onDe
   }
 
   const onTest = async () => {
-    const validationError = validateConnectionForm(form)
+    const validationError = validateConnectionForm(form, validationOptions)
     if (validationError) {
       showToast(validationError, 'error')
       setTestFeedback({ level: 'error', message: validationError })
@@ -119,7 +131,7 @@ export function ConnectionDialog({ open, onOpenChange, connection, onSaved, onDe
   }
 
   const onSave = async () => {
-    const validationError = validateConnectionForm(form)
+    const validationError = validateConnectionForm(form, validationOptions)
     if (validationError) {
       showToast(validationError, 'error')
       return

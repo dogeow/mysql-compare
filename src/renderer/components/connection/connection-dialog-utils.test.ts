@@ -25,6 +25,7 @@ function createForm(overrides: Partial<ConnectionConfig> = {}): ConnectionConfig
     sshUsername: '',
     sshPassword: '',
     sshPrivateKey: '',
+    sshPrivateKeyPath: '',
     sshPassphrase: '',
     createdAt: 1,
     updatedAt: 2,
@@ -50,6 +51,7 @@ describe('connection-dialog-utils', () => {
       sshUsername: '',
       sshPassword: '',
       sshPrivateKey: '',
+      sshPrivateKeyPath: '',
       sshPassphrase: '',
       createdAt: 0,
       updatedAt: 0
@@ -92,6 +94,7 @@ describe('connection-dialog-utils', () => {
       sshHost: 'bastion.internal',
       sshPort: 2222,
       sshUsername: 'deploy',
+      sshPrivateKeyPath: '/Users/sam/.ssh/id_rsa',
       createdAt: 10,
       updatedAt: 20,
       hasPassword: true,
@@ -115,6 +118,7 @@ describe('connection-dialog-utils', () => {
       password: '',
       sshPassword: '',
       sshPrivateKey: '',
+      sshPrivateKeyPath: '/Users/sam/.ssh/id_rsa',
       sshPassphrase: '',
       createdAt: savedConnection.createdAt,
       updatedAt: 0
@@ -173,6 +177,20 @@ describe('connection-dialog-utils', () => {
     expect(payload.sshPassphrase).toBe('phrase')
   })
 
+  it('persists ssh private key path when SSH is enabled', () => {
+    const payload = buildPayload(
+      createForm({
+        useSSH: true,
+        sshHost: 'bastion',
+        sshUsername: 'deploy',
+        sshPassword: 'secret',
+        sshPrivateKeyPath: ' /Users/sam/.ssh/id_rsa '
+      })
+    )
+
+    expect(payload.sshPrivateKeyPath).toBe('/Users/sam/.ssh/id_rsa')
+  })
+
   it('accepts a valid direct connection form', () => {
     expect(validateConnectionForm(createForm())).toBeNull()
   })
@@ -185,10 +203,39 @@ describe('connection-dialog-utils', () => {
           sshHost: 'bastion',
           sshUsername: 'deploy',
           sshPassword: '',
-          sshPrivateKey: '   '
+          sshPrivateKey: '   ',
+          sshPrivateKeyPath: ''
         })
       )
     ).toBe('SSH password or private key is required when SSH tunnel is enabled')
+  })
+
+  it('allows editing an existing SSH key connection without re-entering the private key', () => {
+    expect(
+      validateConnectionForm(
+        createForm({
+          useSSH: true,
+          sshHost: 'bastion',
+          sshUsername: 'deploy',
+          sshPassword: '',
+          sshPrivateKey: '',
+          sshPrivateKeyPath: '/Users/sam/.ssh/id_rsa'
+        })
+      )
+    ).toBeNull()
+
+    expect(
+      validateConnectionForm(
+        createForm({
+          useSSH: true,
+          sshHost: 'bastion',
+          sshUsername: 'deploy',
+          sshPassword: '',
+          sshPrivateKey: ''
+        }),
+        { hasSSHPrivateKey: true }
+      )
+    ).toBeNull()
   })
 
   it('validates direct and SSH port ranges', () => {
