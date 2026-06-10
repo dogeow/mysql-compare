@@ -265,7 +265,7 @@ export function SQLQueryView({ connectionId, connectionName, database, engine }:
       >
         <div
           className={cn(
-            'min-h-0 p-3 transition-colors',
+            'flex min-h-0 flex-col p-3 transition-colors',
             dragging && 'bg-accent/40'
           )}
           onDragEnter={(event) => {
@@ -314,9 +314,9 @@ export function SQLQueryView({ connectionId, connectionName, database, engine }:
               }
             }}
             spellCheck={false}
-            className="h-full min-h-[220px] w-full resize-none rounded-md border border-input bg-background p-3 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
+            className="min-h-0 flex-1 w-full resize-none rounded-md border border-input bg-background p-3 font-mono text-xs focus:outline-none focus:ring-1 focus:ring-ring"
           />
-          <div className="mt-2 flex items-center gap-2 text-xs text-muted-foreground">
+          <div className="mt-2 flex shrink-0 items-center gap-2 text-xs leading-5 text-muted-foreground">
             <FileUp className="h-3.5 w-3.5" />
             <span className="truncate">
               {selectedSQL ? t('sql.selectionActive', { count: selectedSQL.length }) : t('sql.dropFileHint')}

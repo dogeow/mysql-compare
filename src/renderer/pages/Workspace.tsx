@@ -64,7 +64,7 @@ function getTabDisplayTitle(view: WorkspaceView, t: Translator): string {
   if (view.kind === 'ssh-editor') {
     return `${t('workspace.tabTitle.sshEditorPrefix')} · ${view.path.split('/').filter(Boolean).pop() ?? view.path}`
   }
-  return view.table
+  return `${view.database} / ${view.table}`
 }
 
 function isEditableTarget(target: EventTarget | null): boolean {
@@ -602,24 +602,6 @@ export function Workspace() {
                 </>
               ) : (
                 <>
-                  <div className="border-b border-border bg-card/80 px-3 py-2 text-sm">
-                    <div className="flex items-center justify-between gap-2">
-                      <div className="min-w-0 truncate">
-                        <span className="text-muted-foreground">{tab.view.database}</span>
-                        <span className="mx-1 text-muted-foreground">/</span>
-                        <strong>{tab.view.table}</strong>
-                      </div>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 shrink-0"
-                        onClick={() => closeTab(tab.id)}
-                        title={t('workspace.closeTab')}
-                      >
-                        <X className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
                   <Tabs
                     value={currentTableTab}
                     onValueChange={(value) =>

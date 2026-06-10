@@ -165,6 +165,7 @@ function getTabTitle(view: WorkspaceView): string {
   if (view.kind === 'ssh-terminal') return `Terminal · ${view.connectionName}`
   if (view.kind === 'ssh-editor') return view.path.split('/').filter(Boolean).pop() || view.path
   if (view.kind === 'table-compare') return `Compare · ${view.table}`
+  if (view.kind === 'table') return `${view.database} / ${view.table}`
   return view.table
 }
 
