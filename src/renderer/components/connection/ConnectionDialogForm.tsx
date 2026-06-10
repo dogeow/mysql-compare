@@ -42,17 +42,17 @@ export function ConnectionDialogForm({
           <option value="redis">{t('connection.form.redis')}</option>
         </select>
       </Field>
-      <Field label={t('common.name')}>
+      <Field label={t('common.name')} required>
         <Input value={form.name} onChange={(event) => onChange('name', event.target.value)} />
       </Field>
       <Field label={t('connection.form.group')}>
         <Input value={form.group || ''} onChange={(event) => onChange('group', event.target.value)} />
       </Field>
       <div />
-      <Field label={t('connection.form.host')}>
+      <Field label={t('connection.form.host')} required>
         <Input value={form.host} onChange={(event) => onChange('host', event.target.value)} />
       </Field>
-      <Field label={t('connection.form.port')}>
+      <Field label={t('connection.form.port')} required>
         <Input
           type="number"
           min={1}
@@ -63,7 +63,7 @@ export function ConnectionDialogForm({
           }
         />
       </Field>
-      <Field label={t('connection.form.username')}>
+      <Field label={t('connection.form.username')} required={form.engine !== 'redis'}>
         <Input value={form.username} onChange={(event) => onChange('username', event.target.value)} />
       </Field>
       <Field label={connection?.hasPassword ? t('connection.form.passwordKeep') : t('connection.form.password')}>
@@ -94,13 +94,13 @@ export function ConnectionDialogForm({
 
       {form.useSSH && (
         <>
-          <Field label={t('connection.form.sshHost')}>
+          <Field label={t('connection.form.sshHost')} required>
             <Input
               value={form.sshHost || ''}
               onChange={(event) => onChange('sshHost', event.target.value)}
             />
           </Field>
-          <Field label={t('connection.form.sshPort')}>
+          <Field label={t('connection.form.sshPort')} required>
             <Input
               type="number"
               min={1}
@@ -109,7 +109,7 @@ export function ConnectionDialogForm({
               onChange={(event) => onChange('sshPort', parsePortValue(event.target.value, 22))}
             />
           </Field>
-          <Field label={t('connection.form.sshUsername')}>
+          <Field label={t('connection.form.sshUsername')} required>
             <Input
               value={form.sshUsername || ''}
               onChange={(event) => onChange('sshUsername', event.target.value)}
@@ -190,15 +190,20 @@ export function ConnectionDialogForm({
 function Field({
   label,
   children,
-  className
+  className,
+  required = false
 }: {
   label: string
   children: ReactNode
   className?: string
+  required?: boolean
 }) {
   return (
     <div className={className}>
-      <Label className="mb-1 block">{label}</Label>
+      <Label className="mb-1 block">
+        {label}
+        {required ? <span className="ml-0.5 text-destructive">*</span> : null}
+      </Label>
       {children}
     </div>
   )
