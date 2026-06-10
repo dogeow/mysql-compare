@@ -7,6 +7,7 @@ import { cn, formatCellValue } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/i18n'
 import type { ColumnInfo, QueryRowsResult } from '../../../shared/types'
 import { buildRowKey, type CompareColumn } from './table-compare-utils'
+import type { RowDiffInfo } from './table-compare-diff'
 
 interface TableComparePaneProps {
   title: string
@@ -26,6 +27,7 @@ interface TableComparePaneProps {
   onToggleAllVisible?: () => void
   onToggleRow?: (row: Record<string, unknown>, event: MouseEvent<HTMLInputElement>) => void
   compareColumns?: CompareColumn[]
+  rowDiffByKey?: Map<string, RowDiffInfo>
   side?: 'source' | 'target'
 }
 
@@ -47,6 +49,7 @@ export function TableComparePane({
   onToggleAllVisible,
   onToggleRow,
   compareColumns,
+  rowDiffByKey,
   side = 'source'
 }: TableComparePaneProps) {
   const { t } = useI18n()
@@ -140,9 +143,18 @@ export function TableComparePane({
               {data.rows.map((row, index) => {
                 const rowKey = buildRowKey(row, data.primaryKey) ?? `${title}-${index}`
                 const selected = selectedKeys?.has(rowKey) ?? false
+                const diffInfo = rowDiffByKey?.get(rowKey)
 
                 return (
-                  <Tr key={rowKey} className={cn(selected && 'bg-accent/30')}>
+                  <Tr
+                    key={rowKey}
+                    className={cn(
+                      selected && 'bg-accent/30',
+                      !selected && diffInfo?.status === 'modified' && 'bg-amber-500/8',
+                      !selected && diffInfo?.status === 'source-only' && 'bg-sky-500/10',
+                      !selected && diffInfo?.status === 'target-only' && 'bg-violet-500/10'
+                    )}
+                  >
                     {(showSelection || leadingSpacer) && (
                       <Td>
                         {showSelection && (
@@ -161,7 +173,11 @@ export function TableComparePane({
                         <Td
                           key={column.name}
                           title={sideColumn ? renderCellValue(row[column.name], sideColumn.type) : t('diff.pane.notPresent')}
-                          className="h-11"
+                          className={cn(
+                            'h-11',
+                            diffInfo?.changedColumns.has(column.name) &&
+                              'bg-amber-400/25 ring-1 ring-inset ring-amber-500/50'
+                          )}
                         >
                           {sideColumn ? (
                             renderCellValue(row[column.name], sideColumn.type)

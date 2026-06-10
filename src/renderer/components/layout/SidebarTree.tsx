@@ -19,6 +19,7 @@ import { Input } from '@renderer/components/ui/input'
 import { cn } from '@renderer/lib/utils'
 import { useI18n } from '@renderer/i18n'
 import type { SafeConnection } from '../../../shared/types'
+import { SidebarAppMenu } from './SidebarAppMenu'
 import { SidebarConnectionRow } from './SidebarConnectionRow'
 import type {
   DatabaseRowRefEntry,
@@ -131,8 +132,9 @@ export function SidebarTree({
   return (
     <>
       <div className="flex h-[53px] items-center border-b border-border px-2">
-        <div className="flex w-full gap-1">
-          <div className="relative flex-1">
+        <div className="flex w-full items-center gap-1">
+          <SidebarAppMenu />
+          <div className="relative min-w-0 flex-1">
             <Search className="absolute left-2 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <Input
               value={keyword}

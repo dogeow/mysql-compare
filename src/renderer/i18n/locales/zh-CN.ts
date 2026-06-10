@@ -46,7 +46,7 @@ export const zhCN: Dictionary = {
   },
   workspace: {
     emptyTitle: '未打开工作区标签',
-    selectTablePrompt: '请从左侧选择一个表、打开 SSH 文件，或打开"差异 & 同步"。',
+    selectTablePrompt: '请从左侧选择表或 SSH 功能，也可通过左上角菜单打开「差异 & 同步」。',
     tabList: '工作区标签页',
     closeTab: '关闭标签页',
     quickSwitchTitle: '切换工作区标签',
@@ -71,6 +71,7 @@ export const zhCN: Dictionary = {
     },
   },
   sidebar: {
+    appMenu: '应用菜单',
     searchConnection: '搜索连接',
     newConnection: '新建连接',
     noConnection: '暂无连接。',
@@ -464,6 +465,9 @@ export const zhCN: Dictionary = {
       deleteSuccess: '已删除 {{count}} 行',
       confirmOverwriteTargetTable: '确认用源端整表覆盖目标表 "{{table}}"？这会重建目标表结构并替换全部数据。',
       overwriteSuccess: '已用源端整表覆盖目标表 "{{table}}"',
+      legendChangedField: '修改字段',
+      legendSourceOnly: '仅源端',
+      legendTargetOnly: '仅目标端',
     },
     pane: {
       rows: '{{count}} 行',

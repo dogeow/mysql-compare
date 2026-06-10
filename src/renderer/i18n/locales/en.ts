@@ -44,7 +44,7 @@ export const en = {
   },
   workspace: {
     emptyTitle: 'No workspace tab open',
-    selectTablePrompt: 'Select a table from the left, open SSH files, or open Diff & Sync.',
+    selectTablePrompt: 'Select a table or SSH feature on the left, or open Diff & Sync from the app menu.',
     tabList: 'Workspace tabs',
     closeTab: 'Close tab',
     quickSwitchTitle: 'Switch workspace tab',
@@ -69,6 +69,7 @@ export const en = {
     },
   },
   sidebar: {
+    appMenu: 'App menu',
     searchConnection: 'Search connection',
     newConnection: 'New connection',
     noConnection: 'No connection.',
@@ -471,6 +472,9 @@ export const en = {
       confirmOverwriteTargetTable:
         'Overwrite target table "{{table}}" with the full source table? This will recreate the target structure and replace all target data.',
       overwriteSuccess: 'Overwrote target table "{{table}}" from the source table',
+      legendChangedField: 'Changed field',
+      legendSourceOnly: 'Source only',
+      legendTargetOnly: 'Target only',
     },
     pane: {
       rows: '{{count}} rows',

@@ -15,6 +15,7 @@ import {
   prefetchComparedTables,
   type ComparedTableRowsQuery
 } from './table-compare-data-cache'
+import { buildRowDiffLookup } from './table-compare-diff'
 import {
   buildCompareColumns,
   buildCopyValues,
@@ -103,6 +104,24 @@ export function TableCompareView({
     () => buildCompareColumns(sourceState.data?.columns ?? [], targetState.data?.columns ?? []),
     [sourceState.data?.columns, targetState.data?.columns]
   )
+  const sharedKeyColumns = useMemo(() => {
+    const targetPrimaryKey = new Set(targetState.data?.primaryKey ?? [])
+    return (sourceState.data?.primaryKey ?? []).filter((column) => targetPrimaryKey.has(column))
+  }, [sourceState.data?.primaryKey, targetState.data?.primaryKey])
+  const compareColumnNames = useMemo(
+    () => compareColumns.filter((column) => column.source && column.target).map((column) => column.name),
+    [compareColumns]
+  )
+  const rowDiffLookup = useMemo(() => {
+    if (!sourceState.data || !targetState.data) return null
+
+    return buildRowDiffLookup(
+      sourceState.data.rows,
+      targetState.data.rows,
+      sharedKeyColumns,
+      compareColumnNames
+    )
+  }, [compareColumnNames, sharedKeyColumns, sourceState.data, targetState.data])
 
   useEffect(() => {
     setPage(1)
@@ -599,6 +618,20 @@ export function TableCompareView({
             </Button>
           </div>
         </div>
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-[11px] text-muted-foreground">
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-sm bg-amber-400/30 ring-1 ring-inset ring-amber-500/50" />
+            {t('diff.compareView.legendChangedField')}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-sm bg-sky-500/20 ring-1 ring-inset ring-sky-500/40" />
+            {t('diff.compareView.legendSourceOnly')}
+          </span>
+          <span className="inline-flex items-center gap-1.5">
+            <span className="h-3 w-3 rounded-sm bg-violet-500/20 ring-1 ring-inset ring-violet-500/40" />
+            {t('diff.compareView.legendTargetOnly')}
+          </span>
+        </div>
         {sourceState.data && !sourceState.data.hasPrimaryKey && (
           <div className="mt-2 rounded border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-300">
             {t('diff.compareView.noPkCopyDisabled')}
@@ -624,6 +657,7 @@ export function TableCompareView({
           allVisibleSelected={allVisibleSelected}
           onToggleRow={toggleSourceRow}
           compareColumns={compareColumns}
+          rowDiffByKey={rowDiffLookup?.source}
           side="source"
         />
 
@@ -639,6 +673,7 @@ export function TableCompareView({
           onScroll={(event) => syncPaneScroll('target', event)}
           leadingSpacer={sourceSelectionEnabled}
           compareColumns={compareColumns}
+          rowDiffByKey={rowDiffLookup?.target}
           side="target"
         />
       </div>
