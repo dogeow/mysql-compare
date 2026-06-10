@@ -8,6 +8,12 @@ import { Checkbox } from '@renderer/components/ui/checkbox'
 import { Select } from '@renderer/components/ui/select'
 import { useI18n, type Translator } from '@renderer/i18n'
 import type { ColumnInfo } from '../../../shared/types'
+import { JsonViewerTrigger } from './JsonViewerTrigger'
+import {
+  formatInputValue,
+  isRowEditValueEqual,
+  prepareRowEditValues
+} from './row-edit-dialog-utils'
 
 const NULL_ENUM_SELECT_VALUE = '__mysql_compare_null__'
 const EMPTY_ENUM_PLACEHOLDER_VALUE = '__mysql_compare_empty__'
@@ -28,7 +34,7 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
-    setValues(createInitialValues(mode, columns, row))
+    setValues(prepareRowEditValues(mode, columns, row))
     setBusy(false)
     setError(null)
   }, [columns, mode, row])
@@ -41,7 +47,9 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
       })
     }
     if (!row) return false
-    return columns.some((column) => row[column.name] !== values[column.name])
+    return columns.some((column) =>
+      !isRowEditValueEqual(column, row[column.name], values[column.name])
+    )
   }, [columns, mode, row, values])
 
   // 只提交真正改动过的字段（编辑场景下）
@@ -62,7 +70,7 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
         for (const column of columns) {
           const normalized = normalizeColumnValue(column, values[column.name], mode, t)
           validateColumnValue(column, normalized, mode, t)
-          if (row && row[column.name] !== normalized) {
+          if (row && !isRowEditValueEqual(column, row[column.name], normalized)) {
             changes[column.name] = normalized
           }
         }
@@ -130,20 +138,6 @@ export function RowEditDialog({ mode, columns, primaryKey, row, onClose, onSubmi
       )}
     </Dialog>
   )
-}
-
-function createInitialValues(
-  mode: 'insert' | 'edit',
-  columns: ColumnInfo[],
-  row?: Record<string, unknown>
-): Record<string, unknown> {
-  if (mode === 'edit' && row) return { ...row }
-  const init: Record<string, unknown> = {}
-  for (const column of columns) {
-    if (column.isAutoIncrement) continue
-    init[column.name] = createInitialValue(column)
-  }
-  return init
 }
 
 function createInitialValue(column: ColumnInfo): unknown {
@@ -246,7 +240,27 @@ function renderInput(
       />
     )
   }
-  if (c.type.startsWith('text') || c.type === 'json' || c.type.includes('blob')) {
+  if (c.type === 'json') {
+    return (
+      <div className="flex min-w-0 items-start gap-1.5">
+        <textarea
+          value={formatInputValue(c, value)}
+          onChange={(e) => onChange(e.target.value)}
+          rows={4}
+          className="min-w-0 flex-1 rounded-md border border-input bg-background p-2 text-xs font-mono"
+        />
+        <JsonViewerTrigger
+          column={c}
+          row={{ [c.name]: value }}
+          content={formatInputValue(c, value)}
+          onSave={async (_row, _column, nextValue) => {
+            onChange(nextValue)
+          }}
+        />
+      </div>
+    )
+  }
+  if (c.type.startsWith('text') || c.type.includes('blob')) {
     return (
       <textarea
         value={formatInputValue(c, value)}
@@ -271,23 +285,6 @@ function renderInput(
       onChange={(e) => onChange(e.target.value)}
     />
   )
-}
-
-function formatInputValue(column: ColumnInfo, value: unknown): string {
-  if (value === null || value === undefined) return ''
-  if (column.type === 'json') return formatJsonValue(value)
-  if (typeof value === 'object') return JSON.stringify(value, null, 2)
-  return String(value)
-}
-
-function formatJsonValue(value: unknown): string {
-  if (typeof value === 'object') return JSON.stringify(value, null, 2)
-  const text = String(value)
-  try {
-    return JSON.stringify(JSON.parse(text), null, 2)
-  } catch {
-    return text
-  }
 }
 
 function getEnumOptions(column: ColumnInfo): string[] {

@@ -24,6 +24,7 @@ interface UseTableDataQueryResult {
   where: string
   appliedWhere: string
   orderBy: TableDataSortOrder
+  effectiveOrderBy: TableDataSortOrder
   visibleColumns: Set<string>
   wrapCells: boolean
   density: 'compact' | 'comfortable'
@@ -142,6 +143,12 @@ export function useTableDataQuery({
   )
   const hiddenColumnCount = data ? data.columns.length - visibleDataColumns.length : 0
   const hasPendingWhere = where.trim() !== appliedWhere
+  const effectiveOrderBy = useMemo<TableDataSortOrder>(() => {
+    if (orderBy) return orderBy
+    const primaryColumn = data?.primaryKey[0]
+    if (!primaryColumn) return undefined
+    return { column: primaryColumn, dir: 'ASC' }
+  }, [data?.primaryKey, orderBy])
 
   const applyWhere = () => {
     setPage(1)
@@ -205,6 +212,7 @@ export function useTableDataQuery({
     where,
     appliedWhere,
     orderBy,
+    effectiveOrderBy,
     visibleColumns,
     wrapCells,
     density,

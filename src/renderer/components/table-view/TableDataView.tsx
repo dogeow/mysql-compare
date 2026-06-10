@@ -1,6 +1,8 @@
 // 表数据视图：分页、where 过滤、排序、行 CRUD
 import { useState } from 'react'
 import { AlertTriangle } from 'lucide-react'
+import { api, unwrap } from '@renderer/lib/api'
+import { pickPK } from '@renderer/lib/utils'
 import { useUIStore } from '@renderer/store/ui-store'
 import { useI18n } from '@renderer/i18n'
 import { ExportTableDialog } from './ExportTableDialog'
@@ -47,7 +49,7 @@ export function TableDataView({
     pageSize,
     where,
     appliedWhere,
-    orderBy,
+    effectiveOrderBy,
     visibleColumns,
     wrapCells,
     density,
@@ -101,6 +103,26 @@ export function TableDataView({
     refresh
   })
 
+  const saveJsonCell = async (row: Record<string, unknown>, column: string, value: string) => {
+    if (!data?.hasPrimaryKey) {
+      const message = t('tableData.refuseNoPrimaryKey')
+      showToast(message, 'error')
+      throw new Error(message)
+    }
+
+    await unwrap(
+      api.db.updateRow({
+        connectionId,
+        database,
+        table,
+        pkValues: pickPK(row, data.primaryKey),
+        changes: { [column]: value }
+      })
+    )
+    showToast(t('tableData.rowUpdated'), 'success')
+    refresh()
+  }
+
   return (
     <div className="flex flex-col h-full">
       <TableDataToolbar
@@ -149,7 +171,7 @@ export function TableDataView({
         data={data}
         loading={loading}
         visibleColumns={visibleDataColumns}
-        orderBy={orderBy}
+        orderBy={effectiveOrderBy}
         density={density}
         wrapCells={wrapCells}
         selected={selected}
@@ -165,6 +187,7 @@ export function TableDataView({
           if (!readOnly) setEditing({ mode: 'edit', row })
         }}
         onToggleSelect={onToggleSelect}
+        onSaveJsonCell={readOnly ? undefined : saveJsonCell}
       />
 
       {data && (
@@ -202,7 +225,7 @@ export function TableDataView({
           database={database}
           table={table}
           where={appliedWhere || undefined}
-          orderBy={orderBy}
+          orderBy={effectiveOrderBy}
           page={page}
           pageSize={pageSize}
           availableScopes={exportScopes}

@@ -101,6 +101,9 @@ export interface QueryRowsRequest {
   pageSize: number
   orderBy?: { column: string; dir: 'ASC' | 'DESC' }
   where?: string              // 简单 where 片段（不含 'WHERE'）
+  /** API 层注入，用于无主键排序时的稳定默认顺序 */
+  primaryKey?: string[]
+  columnNames?: string[]
 }
 
 export interface QueryRowsResult {

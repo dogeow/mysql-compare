@@ -511,6 +511,7 @@ export const zhCN: Dictionary = {
     viewJson: '查看格式化 JSON',
     jsonViewerTitle: 'JSON 查看器',
     copyJson: '复制 JSON',
+    validJsonRequired: '必须是有效 JSON',
   },
   tableStructure: {
     indexes: '索引',

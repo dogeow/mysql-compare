@@ -283,9 +283,7 @@ export class PostgresDriver implements DbDriver {
     const pool = await this.getPool(req.database)
     const safeTable = this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)
     const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
-    const orderClause = req.orderBy
-      ? `ORDER BY ${this.dialect.quoteIdent(req.orderBy.column)} ${req.orderBy.dir}`
-      : ''
+    const orderClause = buildPgOrderClause(req.columnNames ?? [], req.primaryKey ?? [], req.orderBy)
     const offset = Math.max(0, (req.page - 1) * req.pageSize)
     const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))
 

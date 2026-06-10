@@ -130,7 +130,11 @@ app.post(`${API_PREFIX}/db/query-rows`, asyncHandler(async (req) => {
     throw new Error(`Unknown sort column "${payload.orderBy.column}"`)
   }
 
-  const { rows, total } = await driver.queryRows(payload)
+  const { rows, total } = await driver.queryRows({
+    ...payload,
+    primaryKey: schema.primaryKey,
+    columnNames: schema.columns.map((column) => column.name)
+  })
   const result: QueryRowsResult = {
     rows,
     total,

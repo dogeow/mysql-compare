@@ -54,7 +54,11 @@ export function registerDbIPC(): void {
     if (req.orderBy && !schema.columns.some((column) => column.name === req.orderBy?.column)) {
       throw new Error(`Unknown sort column "${req.orderBy.column}"`)
     }
-    const { rows, total } = await driver.queryRows(req)
+    const { rows, total } = await driver.queryRows({
+      ...req,
+      primaryKey: schema.primaryKey,
+      columnNames: schema.columns.map((column) => column.name)
+    })
     return {
       rows,
       total,

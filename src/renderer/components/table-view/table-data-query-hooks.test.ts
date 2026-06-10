@@ -51,6 +51,7 @@ describe('useTableDataQuery', () => {
       where: undefined
     })
     expect(Array.from(result.current.visibleColumns)).toEqual(['id', 'name', 'active'])
+    expect(result.current.effectiveOrderBy).toEqual({ column: 'id', dir: 'ASC' })
     expect(result.current.visibleDataColumns.map((column) => column.name)).toEqual([
       'id',
       'name',

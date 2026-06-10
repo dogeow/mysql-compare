@@ -519,6 +519,7 @@ export const en = {
     viewJson: 'View formatted JSON',
     jsonViewerTitle: 'JSON Viewer',
     copyJson: 'Copy JSON',
+    validJsonRequired: 'Must be valid JSON',
   },
   tableStructure: {
     indexes: 'Indexes',
