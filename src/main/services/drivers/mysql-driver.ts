@@ -18,6 +18,7 @@ import type {
 } from '../../../shared/types'
 import type { DbDriver, Dialect, StreamRowsOptions } from './types'
 import { buildMySQLOrderClause, mysqlDialect } from './mysql-dialect'
+import { buildDefaultOrderBy, resolveQueryOrderContext } from './query-order-utils'
 import { MySQLPoolCache, type MySQLDriverPoolDebugSnapshot } from './mysql-pool-cache'
 import {
   buildMySQLExplainResult,
@@ -214,10 +215,13 @@ export class MySQLDriver implements DbDriver {
     return this.poolCache.withPool(req.database, async (pool) => {
       const safeTable = this.dialect.quoteTable(req.database, req.table)
       const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
+      const { primaryKey, columnNames } = await resolveQueryOrderContext(req, (database, table) =>
+        this.getTableSchema(database, table)
+      )
       const orderClause = buildMySQLOrderClause(
-        (req.columnNames ?? []).map((name) => ({ name }) as ColumnInfo),
-        req.primaryKey ?? [],
-        req.orderBy
+        columnNames.map((name) => ({ name }) as ColumnInfo),
+        primaryKey,
+        req.orderBy ?? buildDefaultOrderBy(primaryKey)
       )
       const offset = Math.max(0, (req.page - 1) * req.pageSize)
       const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))

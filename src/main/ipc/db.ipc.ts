@@ -21,6 +21,7 @@ import type {
   UpdateRowRequest
 } from '../../shared/types'
 import { dbService } from '../services/db-service'
+import { resolveQueryRowsRequest } from '../services/drivers/query-order-utils'
 import { exportService } from '../services/export-service'
 import { importService } from '../services/import-service'
 import { schemaService } from '../services/schema-service'
@@ -54,11 +55,7 @@ export function registerDbIPC(): void {
     if (req.orderBy && !schema.columns.some((column) => column.name === req.orderBy?.column)) {
       throw new Error(`Unknown sort column "${req.orderBy.column}"`)
     }
-    const { rows, total } = await driver.queryRows({
-      ...req,
-      primaryKey: schema.primaryKey,
-      columnNames: schema.columns.map((column) => column.name)
-    })
+    const { rows, total } = await driver.queryRows(resolveQueryRowsRequest(req, schema))
     return {
       rows,
       total,

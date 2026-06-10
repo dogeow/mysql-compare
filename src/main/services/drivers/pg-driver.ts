@@ -35,6 +35,7 @@ import {
   parseIndexDef,
   qualifiedName
 } from './pg-driver-utils'
+import { resolveQueryOrderContext, buildDefaultOrderBy } from './query-order-utils'
 
 const MAX_PAGE_SIZE = 1000
 const DEFAULT_SCHEMA = 'public'
@@ -283,7 +284,10 @@ export class PostgresDriver implements DbDriver {
     const pool = await this.getPool(req.database)
     const safeTable = this.dialect.quoteTable(DEFAULT_SCHEMA, req.table)
     const whereClause = req.where && req.where.trim() ? `WHERE ${req.where}` : ''
-    const orderClause = buildPgOrderClause(req.columnNames ?? [], req.primaryKey ?? [], req.orderBy)
+    const { primaryKey, columnNames } = await resolveQueryOrderContext(req, (database, table) =>
+      this.getTableSchema(database, table)
+    )
+    const orderClause = buildPgOrderClause(columnNames, primaryKey, req.orderBy ?? buildDefaultOrderBy(primaryKey))
     const offset = Math.max(0, (req.page - 1) * req.pageSize)
     const limit = Math.max(1, Math.min(req.pageSize, MAX_PAGE_SIZE))
 

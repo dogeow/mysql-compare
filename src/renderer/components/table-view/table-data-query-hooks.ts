@@ -67,6 +67,7 @@ export function useTableDataQuery({
   const [density, setDensity] = useState<'compact' | 'comfortable'>('compact')
   const [reloadToken, setReloadToken] = useState(0)
   const requestIdRef = useRef(0)
+  const orderByKey = orderBy ? `${orderBy.column}:${orderBy.dir}` : ''
 
   const refresh = () => setReloadToken((current) => current + 1)
 
@@ -109,7 +110,18 @@ export function useTableDataQuery({
         }
       }
     })()
-  }, [appliedWhere, connectionId, database, orderBy, page, pageSize, reloadToken, showToast, table, tableReloadToken])
+  }, [
+    appliedWhere,
+    connectionId,
+    database,
+    orderByKey,
+    page,
+    pageSize,
+    reloadToken,
+    showToast,
+    table,
+    tableReloadToken
+  ])
 
   const totalPages = useMemo(
     () => (data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1),

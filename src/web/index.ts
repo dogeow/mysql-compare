@@ -10,6 +10,7 @@ import { diffService } from '../main/services/diff-service'
 import { exportService } from '../main/services/export-service'
 import { importService } from '../main/services/import-service'
 import { schemaService } from '../main/services/schema-service'
+import { resolveQueryRowsRequest } from '../main/services/drivers/query-order-utils'
 import { sshFileService } from '../main/services/ssh-file-service'
 import { sshService } from '../main/services/ssh-service'
 import { sshTerminalService } from '../main/services/ssh-terminal-service'
@@ -130,11 +131,7 @@ app.post(`${API_PREFIX}/db/query-rows`, asyncHandler(async (req) => {
     throw new Error(`Unknown sort column "${payload.orderBy.column}"`)
   }
 
-  const { rows, total } = await driver.queryRows({
-    ...payload,
-    primaryKey: schema.primaryKey,
-    columnNames: schema.columns.map((column) => column.name)
-  })
+  const { rows, total } = await driver.queryRows(resolveQueryRowsRequest(payload, schema))
   const result: QueryRowsResult = {
     rows,
     total,
