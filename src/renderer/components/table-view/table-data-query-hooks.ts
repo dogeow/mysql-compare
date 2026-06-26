@@ -7,6 +7,9 @@ type ShowToast = (message: string, level?: ToastLevel) => void
 
 export type TableDataSortOrder = { column: string; dir: 'ASC' | 'DESC' } | undefined
 
+const DOUBLE_QUOTED_COMPARISON_VALUE =
+  /((?:^|[\s(])(?:[A-Za-z_][\w.]*|"[^"]+"|`[^`]+`|\[[^\]]+\])\s*(?:=|<>|!=|<=|>=|<|>|\bLIKE\b|\bILIKE\b)\s*)"((?:[^"\\]|\\.)*)"/gi
+
 interface UseTableDataQueryArgs {
   connectionId: string
   database: string
@@ -164,7 +167,7 @@ export function useTableDataQuery({
 
   const applyWhere = () => {
     setPage(1)
-    setAppliedWhere(where.trim())
+    setAppliedWhere(normalizeWhereClauseInput(where))
   }
 
   const clearWhere = () => {
@@ -246,4 +249,11 @@ export function useTableDataQuery({
     onSort,
     setColumnVisibility
   }
+}
+
+export function normalizeWhereClauseInput(where: string): string {
+  return where.trim().replace(DOUBLE_QUOTED_COMPARISON_VALUE, (_match, prefix: string, value: string) => {
+    const normalizedValue = value.replace(/\\"/g, '"').replace(/'/g, "''")
+    return `${prefix}'${normalizedValue}'`
+  })
 }

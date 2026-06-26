@@ -492,7 +492,7 @@ export const en = {
     },
   },
   tableData: {
-    whereClausePlaceholder: 'WHERE clause, e.g.  status = 1 AND id > 100',
+    whereClausePlaceholder: "WHERE clause, e.g. name = 'Fireball' AND id > 100",
     clearFilter: 'Clear filter',
     deleteCount: 'Delete ({{count}})',
     selectedRows: '{{count}} selected',

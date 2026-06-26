@@ -484,7 +484,7 @@ export const zhCN: Dictionary = {
     },
   },
   tableData: {
-    whereClausePlaceholder: 'WHERE 条件，例如：status = 1 AND id > 100',
+    whereClausePlaceholder: "WHERE 条件，例如：name = '小火球' AND id > 100",
     clearFilter: '清除筛选',
     deleteCount: '删除（{{count}}）',
     selectedRows: '已选 {{count}} 行',

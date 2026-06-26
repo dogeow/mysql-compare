@@ -2,7 +2,7 @@
 
 import { cleanup, renderHook, act, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import { useTableDataQuery } from './table-data-query-hooks'
+import { normalizeWhereClauseInput, useTableDataQuery } from './table-data-query-hooks'
 import { createQueryRowsResult } from './table-data-test-helpers'
 
 const { queryRowsMock } = vi.hoisted(() => ({
@@ -108,6 +108,36 @@ describe('useTableDataQuery', () => {
     expect(result.current.appliedWhere).toBe('')
   })
 
+  it('normalizes double-quoted comparison values before applying WHERE clauses', async () => {
+    queryRowsMock.mockResolvedValue(createQueryRowsResult())
+
+    const { result } = renderHook(() =>
+      useTableDataQuery({
+        connectionId: 'conn-1',
+        database: 'db_main',
+        table: 'users',
+        tableReloadToken: 0,
+        showToast: vi.fn()
+      })
+    )
+
+    await waitFor(() => expect(result.current.data).not.toBeNull())
+
+    act(() => {
+      result.current.setWhere('name = "小火球"')
+    })
+    act(() => {
+      result.current.applyWhere()
+    })
+
+    await waitFor(() =>
+      expect(queryRowsMock).toHaveBeenLastCalledWith(
+        expect.objectContaining({ where: "name = '小火球'" })
+      )
+    )
+    expect(result.current.appliedWhere).toBe("name = '小火球'")
+  })
+
   it('cycles sort order and updates the page size', async () => {
     queryRowsMock.mockResolvedValue(createQueryRowsResult({ total: 600 }))
 
@@ -198,5 +228,18 @@ describe('useTableDataQuery', () => {
     })
 
     await waitFor(() => expect(queryRowsMock.mock.calls.length).toBeGreaterThan(beforeRefreshCalls))
+  })
+})
+
+describe('normalizeWhereClauseInput', () => {
+  it('keeps single quoted values and identifier expressions intact', () => {
+    expect(normalizeWhereClauseInput("name = '小火球'")).toBe("name = '小火球'")
+    expect(normalizeWhereClauseInput('payload->>"name" = \'小火球\'')).toBe(
+      'payload->>"name" = \'小火球\''
+    )
+  })
+
+  it('escapes single quotes inside normalized double-quoted values', () => {
+    expect(normalizeWhereClauseInput("name = \"Sam's skill\"")).toBe("name = 'Sam''s skill'")
   })
 })
